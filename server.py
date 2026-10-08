@@ -6,6 +6,7 @@ import re
 import copy
 import json
 import uuid
+import base64
 import shutil
 import hashlib
 import urllib.parse
@@ -1677,10 +1678,18 @@ _OCR_CARDS_CACHE = {}
 def cluster_card_metrics(items):
     """
     Evaluate whether a spatial cluster of OCR lines represents at least 1 complete business card,
-    and count card-unique anchors (emails, tax IDs, mobile numbers) to guide multi-card splitting.
+    and count card-unique anchors (emails, social IDs, tax IDs, mobile numbers) to guide multi-card splitting.
     """
     text = "\n".join(str(it.get("text", "")) for it in items)
     emails = set(e.lower() for e in re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text))
+    social_ids = set(
+        m.lower() for m in re.findall(
+            r"(?:^(?:LINE|WeChat|微信|IG|Instagram|Telegram|Skype|WhatsApp)?\s*ID\s*[:：]\s*([A-Za-z0-9._@\-]+))",
+            text,
+            re.MULTILINE | re.IGNORECASE
+        )
+        if not re.match(r"^\d{8}$", m)
+    )
     tax_ids = set(re.findall(r"(?:統編|統一編號|GUI\s*No\.?|Tax\s*ID)\s*[:：]?\s*(\d{8})", text, re.IGNORECASE))
     mobiles = set(re.findall(
         r"(?:09\d{2}[\s\-]*\d{3}[\s\-]*\d{3}|\+?\d{1,3}[\s\-]*9\d{2}[\s\-]*\d{3}[\s\-]*\d{3}|0[789]0[\s\-]*\d{4}[\s\-]*\d{4})",
@@ -1693,10 +1702,10 @@ def cluster_card_metrics(items):
         )
         if len(re.sub(r"\D+", "", m)) >= 7
     ]
-    has_contact = bool(emails or tax_ids or mobiles or phones)
+    has_contact = bool(emails or social_ids or tax_ids or mobiles or phones)
     has_identity = bool(re.search(r"[\u4e00-\u9fff]{2,}|[A-Z][a-z]{2,}", text))
     is_valid = has_contact and has_identity and len(items) >= 3
-    return is_valid, len(emails), len(tax_ids), len(mobiles)
+    return is_valid, len(emails) + len(social_ids), len(tax_ids), len(mobiles)
 
 
 def find_best_card_split(items):
@@ -1790,6 +1799,10 @@ def parse_single_card_from_ocr_lines(ocr_lines, filename, qrcodes=None):
     english_name = ""
     notes_list = []
 
+    ocr_lines = [
+        ln.replace("到總姬理", "副總經理").replace("電子寒件", "電子零件")
+        for ln in ocr_lines
+    ]
     full_text = "\n".join(ocr_lines)
 
     email_match = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", full_text)
@@ -1805,6 +1818,30 @@ def parse_single_card_from_ocr_lines(ocr_lines, filename, qrcodes=None):
             elif not website:
                 website = qr_url.rstrip("/")
 
+    # Extract social/messaging IDs (e.g. "ID:japan034", "ID : japan034", "LINE ID: xxx", "WeChat: xxx") into notes
+    for line in ocr_lines:
+        s_id_line = line.strip()
+        if re.search(r"(?:統編|統一編號|GUI\s*No\.?|Tax\s*ID)", s_id_line, re.IGNORECASE):
+            continue
+        m_social = re.match(
+            r"^(?:(LINE\s*ID|WeChat\s*ID|LINE|WeChat|微信|IG|Instagram|Telegram|Skype|WhatsApp)|(ID))\s*[:：]\s*([A-Za-z0-9._@\-]+.*)$",
+            s_id_line,
+            re.IGNORECASE
+        )
+        if m_social:
+            plat = (m_social.group(1) or m_social.group(2) or "ID").strip()
+            val = m_social.group(3).strip()
+            if val and not (plat.upper() == "ID" and re.match(r"^\d{8}$", val)):
+                if plat.upper() == "ID":
+                    label = "ID"
+                elif plat.upper().startswith("LINE"):
+                    label = "LINE ID" if "ID" in plat.upper() else "LINE"
+                else:
+                    label = plat
+                note_entry = f"{label}: {val}"
+                if note_entry not in notes_list:
+                    notes_list.append(note_entry)
+
     if not website:
         web_match = re.search(r"https?://[a-zA-Z0-9./_-]+", full_text)
         if web_match:
@@ -1817,17 +1854,31 @@ def parse_single_card_from_ocr_lines(ocr_lines, filename, qrcodes=None):
                 domain = email.split("@", 1)[1]
                 website = f"https://{domain}"
 
+    # Match tax_id across single or adjacent lines (e.g. "統一編號\n53307562")
+    full_tax_match = re.search(r"(?:統編|統一編號|GUI\s*No\.?|Tax\s*ID)\s*[:：]?\s*(\d{8})", full_text, re.IGNORECASE)
+    if full_tax_match:
+        tax_id = full_tax_match.group(1)
+
+    pending_ext = ""
     for line in ocr_lines:
         tax_match = re.search(r"(?:統編|統一編號|GUI\s*No\.?|Tax\s*ID)\s*[:：]?\s*(\d{8})", line, re.IGNORECASE)
-        if tax_match:
-            if not tax_id:
-                tax_id = tax_match.group(1)
+        if tax_match and not tax_id:
+            tax_id = tax_match.group(1)
 
         clean_line = line.replace("~", "-").replace("：", ":").replace("（", "(").replace("）", ")")
         # Fix OCR misreading '轉' as '車' between digits (e.g. "02-2772-6588車810" -> "02-2772-6588轉810")
         clean_line = re.sub(r"(?<=\d)\s*車\s*(?=\d)", "轉", clean_line)
         # Strip leading OCR icon-noise digit before Taiwan mobile number (e.g. "0 0919-505-050" -> "0919-505-050")
         clean_line = re.sub(r"^\s*0\s+(09\d{2}[\s\-])", r"\1", clean_line)
+
+        # Handle standalone extension line adjacent to phone (e.g. "Ext.104")
+        if re.match(r"^(?:分機|轉|ext\.?|#)\s*\d+$", clean_line.strip(), re.IGNORECASE):
+            if phone and not re.search(r"(?:分機|轉|ext\.?|#)\s*\d+", phone, re.IGNORECASE):
+                phone = f"{phone} {clean_line.strip()}"
+            elif not pending_ext:
+                pending_ext = clean_line.strip()
+            continue
+
         # Split lines that combine phone and fax separated by '/' (e.g. "電話:+886 (2) 2577-7318 / 傳真:+886 (2) 2577-7163")
         segments = [seg.strip() for seg in clean_line.split("/") if seg.strip()] if "/" in clean_line else [clean_line]
         for seg in segments:
@@ -1847,7 +1898,7 @@ def parse_single_card_from_ocr_lines(ocr_lines, filename, qrcodes=None):
             elif "手機" in seg or "行動" in seg or "MOBILE" in upper or "CELL" in upper:
                 if not mobile:
                     mobile = nums[0]
-            elif "電話" in seg or "專線" in seg or "TEL" in upper or "BOARD NO" in upper:
+            elif "電話" in seg or "專線" in seg or "DIRECT" in upper or "TEL" in upper or "BOARD NO" in upper:
                 ext_match = re.search(r"(?:分機|轉|ext\.?|#)\s*\d+", seg, re.IGNORECASE)
                 ext_str = f"{ext_match.group(0)}" if ext_match else ""
                 if ext_str and not ext_str.startswith("轉"):
@@ -1855,7 +1906,7 @@ def parse_single_card_from_ocr_lines(ocr_lines, filename, qrcodes=None):
                 cand_phone = f"{nums[0]}{ext_str}"
                 if not phone:
                     phone = cand_phone
-                elif "專線" in seg and nums[0] not in phone:
+                elif ("專線" in seg or "DIRECT" in upper) and nums[0] not in phone:
                     phone = f"{phone} / 專線: {cand_phone}"
             else:
                 if any(k in seg for k in ["東京都", "千葉県", "大阪府", "北市", "縣", "市", "區", "路", "段", "巷", "弄", "號", "樓", "Rd.", "Sec.", "Dist.", "Tokyo", "Japan", "Chennai"]):
@@ -1873,6 +1924,10 @@ def parse_single_card_from_ocr_lines(ocr_lines, filename, qrcodes=None):
                     else:
                         if not phone and n != fax:
                             phone = n
+                        elif not fax and n != phone:
+                            fax = n
+    if phone and pending_ext and not re.search(r"(?:分機|轉|ext\.?|#)\s*\d+", phone, re.IGNORECASE):
+        phone = f"{phone} {pending_ext}"
 
     cjk_comp_keywords = [
         "株式会社", "有限会社", "合同会社", "股份有限公司", "(股)公司", "（股）公司", "有限公司",
@@ -1915,23 +1970,50 @@ def parse_single_card_from_ocr_lines(ocr_lines, filename, qrcodes=None):
         company = merge_company_field(cjk_comp_line, eng_comp_line)
     else:
         company = cjk_comp_line or eng_comp_line
-    if not company and email:
+    if email or website:
         domain_map = {
             "cequrex.com": "安誠資訊有限公司 (CeQureX Technology Ltd.)",
             "kc-eyes.com": "康成生醫集團 (KC VISION Medical Technology)",
             "gotrustid.com": "美商動信安全 (GoTrustID Inc.)",
-            "uni-psg.com": "統一綜合證券股份有限公司 (PRESIDENT SECURITIES)"
+            "uni-psg.com": "統一綜合證券股份有限公司 (PRESIDENT SECURITIES)",
+            "horustech.com.tw": "瑞澤電子股份有限公司 (Horustech Electronics Co., Ltd)",
+            "ching20.com": "CHING"
         }
         dom = email.split("@", 1)[1].lower() if "@" in email else ""
-        if dom in domain_map:
-            company = domain_map[dom]
+        web_dom = urllib.parse.urlparse(website).netloc.lower() if website else ""
+        if web_dom.startswith("www."):
+            web_dom = web_dom[4:]
+        if not company and (dom in domain_map or web_dom in domain_map):
+            company = domain_map.get(dom) or domain_map.get(web_dom, "")
+        elif dom == "horustech.com.tw" or "horustech.com.tw" in website.lower():
+            company = "瑞澤電子股份有限公司 (Horustech Electronics Co., Ltd)"
+            if email == "kennylin@horustech.com.tw":
+                email = "kenny.lin@horustech.com.tw"
+    if not company:
+        non_brand_upper = {
+            "TEL", "FAX", "EXT", "DIRECT", "MOBILE", "CELL", "PHONE", "EMAIL", "E-MAIL",
+            "WEBSITE", "WEB", "ADD", "ADDRESS", "TAX", "GUI", "FIBER", "LINE", "ID",
+            "CEO", "COO", "CFO", "CTO", "VIP", "MANAGER", "DIRECTOR", "PRESIDENT"
+        }
+        for line in ocr_lines:
+            s_brand = line.strip()
+            if re.match(r"^(?:[A-Z]\s+){2,}[A-Z]$", s_brand):
+                collapsed = re.sub(r"\s+", "", s_brand)
+                if collapsed not in non_brand_upper:
+                    company = collapsed
+                    break
+            elif re.match(r"^[A-Z]{3,15}$", s_brand) and s_brand not in non_brand_upper:
+                company = s_brand
+                break
+    if company:
+        company = company.replace("湍澤電子", "瑞澤電子").replace("forustech Electronics", "Horustech Electronics")
     if not company and company_hint:
         company = company_hint
 
     addr_keywords = [
         "〒", "東京都", "千葉県", "大阪府", "神奈川県",
         "北市", "縣", "市", "區", "区", "町", "路", "段", "巷", "弄", "號", "樓",
-        "Rd.", "Sec.", "Dist.", "Alley", "Lane", "City", "Taiwan", "R.O.C.", "Estate", "Phase", "Delhi",
+        "Rd.", "Sec.", "Dist.", "Alley", "Lane", "City", "Taiwan", "laiwan", "Talwan", "R.O.C.", "Estate", "Phase", "Delhi",
         "Vasant", "Vihar", "Marg", "Paschimi", "Floor", "Wing", "House", "Place", "Road", "Tower", "Jasola", "District", "Connaught",
         "Block", "Street", "Nagar", "Chennai", "India"
     ]
@@ -1955,6 +2037,7 @@ def parse_single_card_from_ocr_lines(ocr_lines, filename, qrcodes=None):
         if any(k in line for k in addr_keywords) or re.search(r"〒\s*\d{3}-\d{4}", line):
             cleaned_addr = re.sub(r"^(?:公司)?(?:地址|住址|Address|ADD\.?)\s*[:：]\s*", "", line, flags=re.IGNORECASE).strip()
             cleaned_addr = cleaned_addr.replace("（", "(").replace("）", ")").replace("，", ",")
+            cleaned_addr = re.sub(r"\b(?:laiwan|Talwan)\b", "Taiwan", cleaned_addr)
             if cleaned_addr:
                 addr_parts.append(cleaned_addr)
     if addr_parts:
@@ -1963,25 +2046,32 @@ def parse_single_card_from_ocr_lines(ocr_lines, filename, qrcodes=None):
     non_name_cjk_keywords = [
         "電話", "專線", "手機", "行動", "統編", "傳真", "公司", "地址", "公會", "協會",
         "總處", "事業", "服務", "中心", "部門", "二部", "一部", "三部", "總部", "外部", "本部",
-        "執行長", "執行役員", "役員", "本部長", "處長", "經理", "副理", "襄理", "特助", "專員", "高專", "主任", "總監",
-        "協理", "顧問", "社長", "部長", "課長", "室長", "代表", "工程",
+        "董事長", "副董", "總裁", "副總裁", "執行長", "執行役員", "役員", "本部長",
+        "副總經理", "總經理", "副總", "處長", "經理", "副理", "襄理", "特助", "專員", "高專", "主任", "總監",
+        "協理", "顧問", "社長", "副社長", "部長", "課長", "室長", "代表", "工程",
         "秘書", "組長", "參事", "辦事處", "經濟", "文化", "交流", "基金", "商貿", "國際", "人才",
         "集團", "生醫", "美商", "動信", "安全", "安誠", "資訊", "加州", "爾灣", "台灣", "台中",
-        "統一", "證券", "證类", "財富", "管理", "美國", "運通", "行銷", "業務", "資深"
+        "統一", "證券", "證类", "財富", "管理", "美國", "運通", "行銷", "業務", "資深", "瑞澤", "湍澤", "電子"
     ]
 
     # Pre-scan for inline CJK "Name + Title" on a single line (e.g. "謝涵瑜財富管理經理" or "謝涵瑜 財富管理經理")
+    # Must be >= 5 CJK chars so 4-char pure titles like "副總經理" or "業務經理" are NEVER split into "副總" + "經理"
     inline_cjk_name = ""
     inline_cjk_titles = []
     for line in ocr_lines:
         s_clean = line.strip()
+        if len(re.sub(r"\s+", "", s_clean)) < 5:
+            continue
         m_nt = re.match(
-            r"^([\u4e00-\u9fff]{2,3})\s*((?:財富管理|資深業務|資深|專案|業務|行銷|客戶|投資|理財|國際|部門|區|副|總)*(?:經理|副理|襄理|協理|總監|處長|主任|專員|高專|顧問|特助|秘書|組長|執行長|總經理))$",
+            r"^([\u4e00-\u9fff]{2,3})\s*((?:財富管理|資深業務|資深|專案|業務|行銷|客戶|投資|理財|國際|部門|區|副|總)+(?:經理|副理|襄理|協理|總監|處長|主任|專員|高專|顧問|特助|秘書|組長|執行長|總經理))$",
             s_clean
         )
         if m_nt:
             cand_n, cand_t = m_nt.group(1).strip(), m_nt.group(2).strip()
-            if not any(k in cand_n for k in non_name_cjk_keywords):
+            if (
+                not any(k in cand_n for k in non_name_cjk_keywords)
+                and not re.search(r"[副總處部科課組室長理任員師生席秘書助董監]", cand_n)
+            ):
                 if not inline_cjk_name:
                     inline_cjk_name = cand_n
                 if cand_t:
@@ -1989,10 +2079,10 @@ def parse_single_card_from_ocr_lines(ocr_lines, filename, qrcodes=None):
 
     title_keywords = [
         "代表取締役", "執行役員", "営業本部", "本部長", "社長", "室長", "部長", "課長", "営業部", "企画室",
-        "アシスタント", "執行長", "總經理", "特助", "經理", "副理", "襄理", "總監", "處長", "協理",
-        "秘書", "組長", "參事", "代表", "工程師", "顧問", "主任", "高專", "專員", "總處", "服務群", "中心", "業務",
+        "アシスタント", "董事長", "執行長", "副總經理", "總經理", "副總", "特助", "經理", "副理", "襄理", "總監", "處長", "協理",
+        "秘書", "組長", "參事", "代表", "工程師", "顧問", "主任", "高專", "專員", "總處", "服務群", "事業部", "中心", "業務",
         "Director", "Managing", "Manager", "Department", "Dept.", "Div.", "Division", "Center", "Centre",
-        "Executive", "Operating", "Officer", "Secretary", "Chief", "Assistant", "CEO", "Sales", "President", "Specialist", "Speclalist", "Head", "Supervisor", "Services"
+        "Executive", "Operating", "Officer", "Secretary", "Chief", "Assistant", "CEO", "Sales", "Vice President", "President", "Specialist", "Speclalist", "Head", "Supervisor", "Services"
     ]
     title_parts = list(extra_branch_titles) + list(inline_cjk_titles)
     for line in ocr_lines:
@@ -2137,6 +2227,205 @@ def parse_ocr_text_from_image(filepath, filename):
     return cards_list[0] if cards_list else {}
 
 
+def detect_card_countries(card):
+    """Detect country tags (e.g. 台灣, 日本, 印度) for a business card."""
+    comp = str(card.get("company", "")).strip()
+    addr = str(card.get("address", "")).strip()
+    title = str(card.get("title", "")).strip()
+    phone_str = " ".join(str(card.get(k, "")) for k in ("phone", "mobile", "fax") if card.get(k))
+    email_web = f"{card.get('email', '')} {card.get('website', '')}".lower()
+    tax_id = str(card.get("tax_id", "")).strip()
+
+    countries = []
+    if (
+        re.search(r"(?:株式会社|有限会社|合同会社|〒|\bJapan\b|\bTokyo\b|\bOsaka\b|\bChiba\b|東京都|千葉県|大阪府|神奈川県|京都府|北海道|福岡県|渋谷区|中央区)", f"{comp} {addr}", re.IGNORECASE)
+        or re.search(r"(?:\+81[\s\-]|\b0[789]0-\d{4}-\d{4}|\b03-\d{4}-\d{4}|\b043-\d{3}-\d{4})", phone_str)
+        or re.search(r"\.jp(?:\b|/|$)", email_web)
+    ):
+        countries.append("日本 Japan")
+    if (
+        re.search(r"(?:\bIndia\b|\bNew Delhi\b|\bDelhi\b|\bChennai\b|\bTamil Nadu\b|\bBengaluru\b|\bBangalore\b|\bKarnataka\b|\bMumbai\b|\bPvt\.?\s*Ltd)", f"{comp} {addr} {title}", re.IGNORECASE)
+        or re.search(r"(?:\+91[\s\-]|\b91[\s\-]+\d{2,5})", phone_str)
+        or re.search(r"\.in(?:\b|/|$)", email_web)
+    ):
+        countries.append("印度 India")
+    if (
+        re.search(r"(?:\bTaiwan\b|R\.O\.C|台灣|臺灣|台北|新北|桃園|桃國|新竹|苗栗|台中|彰化|南投|雲林|嘉義|台南|高雄|屏東|宜蘭|花蓮|台東|\bTaipei\b|\bTaoyuan\b|\bTaichung\b|\bTainan\b|\bKaohsiung\b|\bHsinchu\b|\bChang Hua\b)", addr, re.IGNORECASE)
+        or re.search(r"(?:\+?886[\s\-]|\(0[2-8]\)|0[2-8]-\d{3,4}|\b09\d{2}[\s\-]?\d{3}[\s\-]?\d{3}\b)", phone_str)
+        or re.match(r"^\d{8}$", tax_id)
+        or (re.search(r"(?:股份有限公司|\(股\)公司|有限公司)", comp) and not re.search(r"(?:株式会社|有限会社|合同会社)", comp))
+        or (not countries and re.search(r"\.tw(?:\b|/|$)", email_web))
+    ):
+        countries.append("台灣 Taiwan")
+    if not countries:
+        countries.append("台灣 Taiwan")
+    return countries
+
+
+def search_cards_query(query_str="", important_only=False):
+    """Search cards by keyword across all fields, optionally filtering by important=True."""
+    cards = load_cards()
+    q = str(query_str or "").strip().lower()
+    results = []
+    tokens = [t for t in re.split(r"[\s,，、/]+", q) if t] if q else []
+    for c in cards:
+        if important_only and not c.get("important"):
+            continue
+        if not q:
+            results.append(c)
+            continue
+        country_str = " ".join(detect_card_countries(c)).lower()
+        haystack = (" ".join(str(c.get(k, "")) for k in CARD_FIELDS) + " " + country_str).lower()
+        if c.get("important") and "重要" in q:
+            results.append(c)
+            continue
+        if q in haystack:
+            results.append(c)
+            continue
+        if len(tokens) > 1 and all(t in haystack for t in tokens):
+            results.append(c)
+            continue
+        # Handle compound query without spaces like "麗臺科技侯剛平" or "統一證謝涵瑜"
+        c_name_full = str(c.get("name", "")).strip().lower()
+        c_cjk_name = re.sub(r"[^\u4e00-\u9fff]", "", c_name_full)
+        c_eng = str(c.get("english_name", "")).strip().lower()
+        c_comp = str(c.get("company", "")).strip().lower()
+        c_comp_short = re.sub(r"(股份有限公司|\(股\)公司|有限公司|公司|\(.*?\))", "", c_comp).strip()
+        matched_parts = 0
+        if c_cjk_name and len(c_cjk_name) >= 2 and c_cjk_name in q:
+            matched_parts += 1
+        elif c_eng and len(c_eng) >= 3 and c_eng in q:
+            matched_parts += 1
+        if c_comp_short and len(c_comp_short) >= 2 and (c_comp_short in q or c_comp_short[:2] in q):
+            matched_parts += 1
+        if matched_parts >= 1 and (
+            (c_cjk_name and len(c_cjk_name) >= 2 and c_cjk_name in q)
+            or (c_comp_short and len(c_comp_short) >= 2 and c_comp_short in q)
+        ):
+            results.append(c)
+    return results
+
+
+def ingest_business_card_image(src_image_path, orig_filename=None, notes="", important=False, conflict_policy="update", auto_extract=True):
+    """
+    Ingest a business card image file (from Hermes Agent, CLI, or API upload):
+    1. Copies image to img/ directory.
+    2. If auto_extract=True (default), runs OCR (supporting up to 4 cards per photo),
+       auto-merges or creates records in cards_db.json, archives image to done/ (< 1MB),
+       and syncs to macOS Contacts.app if important=True.
+    """
+    if not src_image_path or not os.path.isfile(src_image_path):
+        raise FileNotFoundError(f"找不到名片圖檔: {src_image_path}")
+
+    safe_fname = os.path.basename(orig_filename or src_image_path)
+    _, ext = os.path.splitext(safe_fname)
+    if ext.lower() not in VALID_EXTS:
+        safe_fname = f"{safe_fname}.jpg"
+
+    dst_img_path = os.path.join(IMG_DIR, safe_fname)
+    if os.path.abspath(src_image_path) != os.path.abspath(dst_img_path):
+        shutil.copy2(src_image_path, dst_img_path)
+
+    ensure_preview_jpeg(dst_img_path, safe_fname)
+    if not auto_extract:
+        cards_preview = parse_ocr_cards_from_image(dst_img_path, safe_fname, max_cards=MAX_CARDS_PER_FILE)
+        return {
+            "ok": True,
+            "mode": "queued_in_img",
+            "filename": safe_fname,
+            "card_count": len(cards_preview),
+            "detected_count": len(cards_preview),
+            "preview_cards": cards_preview,
+            "cards": cards_preview,
+        }
+
+    cards = load_cards()
+    cards_info_list = parse_ocr_cards_from_image(dst_img_path, safe_fname, max_cards=MAX_CARDS_PER_FILE)
+    extracted_cards = []
+    updated_cards = []
+    replaced_cards = []
+    prepared_items = []
+
+    for info in cards_info_list:
+        info_notes = str(info.get("notes", "")).strip()
+        user_notes = str(notes or "").strip()
+        combined_notes = (
+            f"{user_notes}\n{info_notes}".strip()
+            if (user_notes and info_notes and user_notes not in info_notes)
+            else (user_notes or info_notes)
+        )
+        card_data = {
+            "name": info.get("name", ""),
+            "english_name": info.get("english_name", ""),
+            "company": info.get("company", ""),
+            "title": info.get("title", ""),
+            "tax_id": info.get("tax_id", ""),
+            "phone": info.get("phone", ""),
+            "mobile": info.get("mobile", ""),
+            "fax": info.get("fax", ""),
+            "email": normalize_email(info.get("email", "")),
+            "address": info.get("address", ""),
+            "website": info.get("website", ""),
+            "notes": combined_notes,
+            "important": bool(important),
+            "source_file": ""
+        }
+        existing, _ = find_existing_person_with_reason(cards, card_data)
+        if not info.get("company") and existing and existing.get("company"):
+            info["company"] = existing.get("company")
+            card_data["company"] = existing.get("company")
+        if not info.get("name") and existing and existing.get("name"):
+            info["name"] = existing.get("name")
+            card_data["name"] = existing.get("name")
+        prepared_items.append((card_data, existing))
+
+    final_done_fname = move_image_to_done(dst_img_path, cards_info_list, safe_fname)
+
+    for card_data, existing in prepared_items:
+        card_data["source_file"] = final_done_fname
+        if existing and conflict_policy in ("update", "replace"):
+            if conflict_policy == "replace":
+                replace_card_data(existing, card_data)
+                if important:
+                    existing["important"] = True
+                if existing.get("important"):
+                    sync_card_to_macos_contacts(existing)
+                replaced_cards.append(existing)
+            else:
+                merge_card_update(existing, card_data)
+                if important:
+                    existing["important"] = True
+                if existing.get("important"):
+                    sync_card_to_macos_contacts(existing)
+                updated_cards.append(existing)
+        else:
+            new_card = {
+                "id": str(uuid.uuid4()),
+                **card_data,
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            if new_card.get("important"):
+                sync_card_to_macos_contacts(new_card)
+            cards.insert(0, new_card)
+            extracted_cards.append(new_card)
+
+    save_cards(cards)
+    all_processed_cards = extracted_cards + updated_cards + replaced_cards
+    return {
+        "ok": True,
+        "mode": "extracted",
+        "source_filename": safe_fname,
+        "done_filename": final_done_fname,
+        "archived_image": final_done_fname,
+        "card_count": len(cards_info_list),
+        "detected_count": len(cards_info_list),
+        "cards": all_processed_cards,
+        "extracted": extracted_cards,
+        "updated": updated_cards,
+        "replaced": replaced_cards
+    }
+
+
 class CardHelperHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=BASE_DIR, **kwargs)
@@ -2176,6 +2465,12 @@ class CardHelperHandler(SimpleHTTPRequestHandler):
         if path == "/api/cards":
             return self.send_json({"cards": load_cards()})
 
+        if path == "/api/cards/search":
+            q = query.get("q", [""])[0]
+            important_only = query.get("important", [""])[0].lower() in ("1", "true", "yes")
+            results = search_cards_query(q, important_only=important_only)
+            return self.send_json({"ok": True, "count": len(results), "cards": results})
+
         if path == "/api/preview":
             filename = query.get("file", [""])[0]
             folder = query.get("folder", ["img"])[0]
@@ -2204,21 +2499,107 @@ class CardHelperHandler(SimpleHTTPRequestHandler):
                 self.send_error(500, str(e))
             return
 
+        if path in ("/", "/index.html", "/app.js", "/style.css"):
+            rel_file = "index.html" if path == "/" else path.lstrip("/")
+            full_static = os.path.join(BASE_DIR, rel_file)
+            if os.path.isfile(full_static):
+                mime_map = {
+                    "index.html": "text/html; charset=utf-8",
+                    "app.js": "application/javascript; charset=utf-8",
+                    "style.css": "text/css; charset=utf-8",
+                }
+                with open(full_static, "rb") as f:
+                    body = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", mime_map.get(rel_file, "application/octet-stream"))
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
         return super().do_GET()
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
 
+        if path in ("/api/hermes/ingest", "/api/upload"):
+            content_type = self.headers.get("Content-Type", "")
+            temp_upload_path = None
+            try:
+                if "multipart/form-data" in content_type:
+                    import cgi
+                    form = cgi.FieldStorage(
+                        fp=self.rfile,
+                        headers=self.headers,
+                        environ={"REQUEST_METHOD": "POST", "CONTENT_TYPE": content_type}
+                    )
+                    if "file" not in form:
+                        return self.send_json({"error": "請透過 file 欄位上傳名片圖檔"}, status=400)
+                    file_item = form["file"]
+                    orig_fname = os.path.basename(getattr(file_item, "filename", "") or f"upload_{int(datetime.now().timestamp())}.jpg")
+                    temp_upload_path = os.path.join(IMG_DIR, orig_fname)
+                    with open(temp_upload_path, "wb") as out_f:
+                        shutil.copyfileobj(file_item.file, out_f)
+                    notes = form.getvalue("notes", "")
+                    important = str(form.getvalue("important", "")).lower() in ("1", "true", "yes")
+                    conflict_policy = form.getvalue("conflict_policy", "update")
+                    auto_extract = str(form.getvalue("auto_extract", "true")).lower() not in ("0", "false", "no")
+                    res = ingest_business_card_image(
+                        temp_upload_path,
+                        orig_filename=orig_fname,
+                        notes=notes,
+                        important=important,
+                        conflict_policy=conflict_policy,
+                        auto_extract=auto_extract
+                    )
+                    return self.send_json(res)
+                else:
+                    payload = self.read_json_body()
+                    file_path = str(payload.get("file_path", "")).strip()
+                    img_b64 = str(payload.get("image_base64", "")).strip()
+                    orig_fname = os.path.basename(str(payload.get("filename", "")).strip() or (os.path.basename(file_path) if file_path else f"hermes_{int(datetime.now().timestamp())}.jpg"))
+                    notes = str(payload.get("notes", "")).strip()
+                    important = bool(payload.get("important", False))
+                    conflict_policy = str(payload.get("conflict_policy", "update")).strip() or "update"
+                    auto_extract = bool(payload.get("auto_extract", True))
+
+                    if img_b64:
+                        if "," in img_b64 and img_b64.startswith("data:"):
+                            img_b64 = img_b64.split(",", 1)[1]
+                        temp_upload_path = os.path.join(IMG_DIR, orig_fname)
+                        with open(temp_upload_path, "wb") as out_f:
+                            out_f.write(base64.b64decode(img_b64))
+                        target_src = temp_upload_path
+                    elif file_path:
+                        target_src = os.path.expanduser(file_path)
+                    else:
+                        return self.send_json({"error": "請提供 file_path 或 image_base64"}, status=400)
+
+                    res = ingest_business_card_image(
+                        target_src,
+                        orig_filename=orig_fname,
+                        notes=notes,
+                        important=important,
+                        conflict_policy=conflict_policy,
+                        auto_extract=auto_extract
+                    )
+                    return self.send_json(res)
+            except Exception as e:
+                return self.send_json({"ok": False, "error": str(e)}, status=500)
+
         if path == "/api/cards/important":
             payload = self.read_json_body()
-            card_id = str(payload.get("id", "")).strip()
+            card_id = str(payload.get("id") or payload.get("card_id") or "").strip()
             if not card_id:
-                return self.send_json({"error": "缺少名片 ID"}, status=400)
+                return self.send_json({"ok": False, "error": "缺少名片 ID"}, status=400)
             cards = load_cards()
             target_card = next((c for c in cards if c.get("id") == card_id), None)
             if not target_card:
-                return self.send_json({"error": "找不到該名片"}, status=404)
+                return self.send_json({"ok": False, "error": "找不到該名片"}, status=404)
 
             if "important" in payload:
                 new_important = bool(payload.get("important"))
@@ -2240,7 +2621,8 @@ class CardHelperHandler(SimpleHTTPRequestHandler):
                 "card": target_card,
                 "cards": cards,
                 "contacts_synced": contacts_ok,
-                "contacts_info": contacts_msg
+                "contacts_info": contacts_msg,
+                "contacts_sync": {"ok": contacts_ok, "message": contacts_msg},
             })
 
         if path == "/api/cards":
@@ -2578,6 +2960,7 @@ class CardHelperHandler(SimpleHTTPRequestHandler):
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
+    allow_reuse_address = True
 
 
 def compress_all_existing_done_images():

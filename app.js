@@ -542,17 +542,116 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    const COUNTRY_DEFINITIONS = [
+        { key: 'TW', label: '🇹🇼 台灣', name: '台灣 Taiwan' },
+        { key: 'JP', label: '🇯🇵 日本', name: '日本 Japan' },
+        { key: 'IN', label: '🇮🇳 印度', name: '印度 India' },
+        { key: 'US', label: '🇺🇸 美國', name: '美國 USA' },
+        { key: 'CN', label: '🇨🇳 中國', name: '中國 China' },
+        { key: 'HK', label: '🇭🇰 香港', name: '香港 Hong Kong' },
+        { key: 'SG', label: '🇸🇬 新加坡', name: '新加坡 Singapore' },
+        { key: 'KR', label: '🇰🇷 韓國', name: '韓國 Korea' }
+    ];
+
+    function detectCardCountries(card) {
+        const comp = (card.company || '').trim();
+        const addr = (card.address || '').trim();
+        const title = (card.title || '').trim();
+        const phoneStr = [card.phone, card.mobile, card.fax].filter(Boolean).join(' ');
+        const emailWeb = [card.email, card.website].filter(Boolean).join(' ').toLowerCase();
+        const taxId = (card.tax_id || '').trim();
+
+        const matched = [];
+
+        // 日本 (JP)
+        if (
+            /(株式会社|有限会社|合同会社|〒|\bJapan\b|\bTokyo\b|\bOsaka\b|\bChiba\b|東京都|千葉県|大阪府|神奈川県|京都府|北海道|福岡県|渋谷区|中央区)/i.test(comp + ' ' + addr) ||
+            /(?:\+81[\s\-]|\b0[789]0-\d{4}-\d{4}|\b03-\d{4}-\d{4}|\b043-\d{3}-\d{4})/.test(phoneStr) ||
+            /\.jp(?:\b|\/|$)/.test(emailWeb)
+        ) {
+            matched.push('JP');
+        }
+
+        // 印度 (IN)
+        if (
+            /(\bIndia\b|\bNew Delhi\b|\bDelhi\b|\bChennai\b|\bTamil Nadu\b|\bBengaluru\b|\bBangalore\b|\bKarnataka\b|\bMumbai\b|\bPvt\.?\s*Ltd)/i.test(comp + ' ' + addr + ' ' + title) ||
+            /(?:\+91[\s\-]|\b91[\s\-]+\d{2,5})/.test(phoneStr) ||
+            /\.in(?:\b|\/|$)/.test(emailWeb)
+        ) {
+            matched.push('IN');
+        }
+
+        // 美國 (US)
+        if (
+            /(\bUSA\b|\bU\.S\.A\.\b|\bUnited States\b|\bCalifornia\b|\bNew York\b)/i.test(addr) ||
+            /(?:^\+1[\s\-]|\s\+1[\s\-])/.test(phoneStr)
+        ) {
+            matched.push('US');
+        }
+
+        // 中國 (CN)
+        if (
+            /(\bChina\b|\bP\.R\.C\.\b|北京市|上海市|深圳市|廣州市|广东省|江苏省|浙江省)/i.test(addr) ||
+            /(?:\+86[\s\-])/.test(phoneStr) ||
+            /\.cn(?:\b|\/|$)/.test(emailWeb)
+        ) {
+            matched.push('CN');
+        }
+
+        // 香港 (HK)
+        if (
+            /(\bHong Kong\b|\bKowloon\b|香港|九龍)/i.test(addr) ||
+            /(?:\+852[\s\-])/.test(phoneStr) ||
+            /\.hk(?:\b|\/|$)/.test(emailWeb)
+        ) {
+            matched.push('HK');
+        }
+
+        // 新加坡 (SG)
+        if (
+            /(\bSingapore\b|新加坡)/i.test(addr) ||
+            /(?:\+65[\s\-])/.test(phoneStr) ||
+            /\.sg(?:\b|\/|$)/.test(emailWeb)
+        ) {
+            matched.push('SG');
+        }
+
+        // 韓國 (KR)
+        if (
+            /(\bKorea\b|\bSeoul\b|韓國|首爾)/i.test(addr) ||
+            /(?:\+82[\s\-])/.test(phoneStr) ||
+            /\.kr(?:\b|\/|$)/.test(emailWeb)
+        ) {
+            matched.push('KR');
+        }
+
+        // 台灣 (TW)
+        if (
+            /(\bTaiwan\b|R\.O\.C|台灣|臺灣|台北|新北|桃園|桃國|新竹|苗栗|台中|彰化|南投|雲林|嘉義|台南|高雄|屏東|宜蘭|花蓮|台東|\bTaipei\b|\bTaoyuan\b|\bTaichung\b|\bTainan\b|\bKaohsiung\b|\bHsinchu\b|\bChang Hua\b)/i.test(addr) ||
+            /(?:\+?886[\s\-]|\(0[2-8]\)|0[2-8]-\d{3,4}|\b09\d{2}[\s\-]?\d{3}[\s\-]?\d{3}\b)/.test(phoneStr) ||
+            /^\d{8}$/.test(taxId) ||
+            (/股份有限公司|\(股\)公司|有限公司/.test(comp) && !/株式会社|有限会社|合同会社/.test(comp)) ||
+            (matched.length === 0 && /\.tw(?:\b|\/|$)/.test(emailWeb))
+        ) {
+            matched.push('TW');
+        }
+
+        if (matched.length === 0) {
+            matched.push('TW');
+        }
+
+        return matched;
+    }
+
     function renderCompanyFilters() {
         companyFilterBar.innerHTML = '';
         if (cards.length === 0) return;
 
-        const companies = Array.from(new Set(cards.map(c => (c.company || '').trim()).filter(Boolean)));
         const importantCount = cards.filter(c => c.important).length;
-        if (companies.length === 0 && importantCount === 0) return;
 
         const label = document.createElement('span');
         label.className = 'small text-muted me-1';
-        label.textContent = '🏢 快速篩選：';
+        label.textContent = '🌍 快速篩選：';
         companyFilterBar.appendChild(label);
 
         const allBtn = document.createElement('button');
@@ -568,21 +667,23 @@ document.addEventListener('DOMContentLoaded', () => {
         const impBtn = document.createElement('button');
         impBtn.type = 'button';
         impBtn.className = `btn btn-sm company-pill fw-semibold ${activeCompanyFilter === '__important__' ? 'btn-warning text-dark' : 'btn-outline-warning text-dark'}`;
-        impBtn.innerHTML = `⭐ 重要名片 (${importantCount})`;
+        impBtn.innerHTML = `⭐ 重要 (${importantCount})`;
         impBtn.addEventListener('click', () => {
             activeCompanyFilter = activeCompanyFilter === '__important__' ? '' : '__important__';
             renderCards();
         });
         companyFilterBar.appendChild(impBtn);
 
-        companies.forEach(comp => {
-            const count = cards.filter(c => (c.company || '').trim() === comp).length;
+        COUNTRY_DEFINITIONS.forEach(country => {
+            const count = cards.filter(c => detectCardCountries(c).includes(country.key)).length;
+            if (count === 0) return;
+            const filterKey = `country:${country.key}`;
             const btn = document.createElement('button');
             btn.type = 'button';
-            btn.className = `btn btn-sm company-pill ${activeCompanyFilter === comp ? 'btn-primary' : 'btn-outline-secondary'}`;
-            btn.textContent = `${comp} (${count})`;
+            btn.className = `btn btn-sm company-pill ${activeCompanyFilter === filterKey ? 'btn-primary' : 'btn-outline-secondary'}`;
+            btn.textContent = `${country.label} (${count})`;
             btn.addEventListener('click', () => {
-                activeCompanyFilter = activeCompanyFilter === comp ? '' : comp;
+                activeCompanyFilter = activeCompanyFilter === filterKey ? '' : filterKey;
                 renderCards();
             });
             companyFilterBar.appendChild(btn);
@@ -603,12 +704,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const filtered = cards.filter(c => {
+            const cardCountries = detectCardCountries(c);
             if (activeCompanyFilter === '__important__') {
                 if (!c.important) return false;
+            } else if (activeCompanyFilter && activeCompanyFilter.startsWith('country:')) {
+                const targetCountry = activeCompanyFilter.slice('country:'.length);
+                if (!cardCountries.includes(targetCountry)) return false;
             } else if (activeCompanyFilter && (c.company || '').trim() !== activeCompanyFilter) {
                 return false;
             }
             if (!q) return true;
+
+            const countrySearchNames = cardCountries
+                .map(k => (COUNTRY_DEFINITIONS.find(d => d.key === k) || {}).name || '')
+                .join(' ');
 
             let fieldsToSearch = [];
             if (field === 'name') {
@@ -622,11 +731,11 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (field === 'contact') {
                 fieldsToSearch = [c.phone, c.mobile, c.fax, c.email];
             } else if (field === 'address') {
-                fieldsToSearch = [c.address, c.website];
+                fieldsToSearch = [c.address, c.website, countrySearchNames];
             } else if (field === 'notes') {
                 fieldsToSearch = [c.notes];
             } else {
-                fieldsToSearch = [c.name, c.english_name, c.company, c.tax_id, c.title, c.phone, c.mobile, c.fax, c.email, c.address, c.website, c.notes, c.important ? '重要' : ''];
+                fieldsToSearch = [c.name, c.english_name, c.company, c.tax_id, c.title, c.phone, c.mobile, c.fax, c.email, c.address, c.website, c.notes, countrySearchNames, c.important ? '重要' : ''];
             }
 
             return fieldsToSearch.some(val => val && String(val).toLowerCase().includes(q));
@@ -661,6 +770,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const mergeIdx = selectedMergeCardIds.indexOf(card.id);
             const isMergeSelected = mergeIdx !== -1;
             const isImportant = Boolean(card.important);
+            const cardCountries = detectCardCountries(card);
+            const countryBadgesHtml = cardCountries
+                .map(k => {
+                    const def = COUNTRY_DEFINITIONS.find(d => d.key === k);
+                    return def ? `<span class="badge bg-light text-secondary border" style="font-size: 11px;">${def.label}</span>` : '';
+                })
+                .join('');
 
             col.innerHTML = `
                 <div class="card card-item h-100 shadow-sm bg-white ${isMergeSelected ? 'merge-selected' : ''} ${isImportant ? 'border-warning border-2' : ''}" data-card-id="${escapeHtml(card.id)}">
@@ -670,7 +786,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <input type="checkbox" class="form-check-input mt-0 card-merge-checkbox" ${isMergeSelected ? 'checked' : ''}>
                                 <span class="card-merge-check-text">${isMergeSelected ? (mergeIdx === 0 ? '已選取 #1 (主名片)' : '已選取 #2 (併入)') : '勾選合併'}</span>
                             </label>
-                            <div class="d-flex align-items-center gap-1">
+                            <div class="d-flex align-items-center gap-1 flex-wrap">
+                                ${countryBadgesHtml}
                                 ${allSources.length > 1 ? `<span class="badge bg-success-subtle text-success border border-success-subtle" style="font-size: 11px;">已合併 ${allSources.length} 張圖檔</span>` : ''}
                                 <button type="button" class="btn btn-sm py-0 px-2 fw-semibold toggle-important-btn ${isImportant ? 'btn-warning text-dark shadow-sm' : 'btn-outline-warning text-dark'}" style="font-size: 12px;" title="${isImportant ? '點擊取消「重要」標記（並從電腦聯絡人移除）' : '標定為「重要」並自動加入電腦的聯絡人資訊'}">
                                     ${isImportant ? '⭐ 重要 (已入聯絡人)' : '☆ 標記重要'}
