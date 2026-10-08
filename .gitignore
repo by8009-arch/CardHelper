@@ -1,0 +1,15 @@
+# macOS system files
+.DS_Store
+
+# Preview & runtime cache
+.cache/
+__pycache__/
+*.pyc
+/tmp_preview_*
+
+# Ignore all business card image files in img/ and done/
+img/*
+!img/.gitkeep
+!img/done/
+img/done/*
+!img/done/.gitkeep

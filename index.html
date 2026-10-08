@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CardHelper - 智慧名片管理系統</title>
+    <link rel="icon" type="image/png" href="icon.png">
+    <link rel="apple-touch-icon" href="icon.png">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-light">
+    <!-- 頂部導覽列 -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm sticky-top">
+        <div class="container">
+            <a class="navbar-brand fw-bold d-flex align-items-center gap-2" href="#">
+                <img src="icon.png" alt="CardHelper" width="34" height="34" class="rounded-2 shadow-sm">
+                <span>CardHelper 名片小幫手</span>
+            </a>
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge bg-light text-primary fs-6" id="dbCountBadge">名片庫：0 張</span>
+                <button class="btn btn-sm btn-outline-light" id="exportCsvBtn" title="匯出名片資料庫為 CSV">📥 匯出 CSV</button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container py-4">
+        <!-- 狀態通知訊息區 -->
+        <div id="alertContainer"></div>
+
+        <!-- 區塊 1：img 目錄名片圖檔自動讀取與提取 -->
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-header bg-white py-3 d-flex flex-wrap justify-content-between align-items-center gap-2 border-bottom">
+                <div>
+                    <h5 class="mb-0 fw-bold text-primary d-flex align-items-center gap-2">
+                        <span>🖼️</span> 待處理名片圖檔（自動讀取 <code>img/</code> 目錄）
+                        <span class="badge rounded-pill bg-primary" id="pendingCountBadge">0</span>
+                    </h5>
+                    <small class="text-muted">點選單張或多張名片（支援單一圖檔包含最多 4 張名片自動分割辨識），點擊「自動提取名片資料」即可辨識內容、存入資料庫並自動移至 <code>done/</code> 目錄</small>
+                </div>
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="refreshImgBtn">
+                        🔄 重新掃描目錄
+                    </button>
+                    <button type="button" class="btn btn-outline-primary btn-sm" id="selectAllBtn">
+                        ☑️ 全選
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="deselectAllBtn">
+                        ⬜ 取消全選
+                    </button>
+                    <button type="button" class="btn btn-success fw-bold px-3" id="extractBtn" disabled>
+                        ✨ 自動提取資料並新增至資料庫 (<span id="selectedCount">0</span>)
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <!-- 批次提取時的預設背書/備註 (選填) -->
+                <div class="mb-3 d-flex align-items-center gap-2 bg-light p-2 rounded border">
+                    <span class="small fw-semibold text-secondary text-nowrap">📝 匯入預設的備註（選填）：</span>
+                    <input type="text" class="form-control form-control-sm" id="extractDefaultNotes" placeholder="例如：2026 東京商務展交換名片、重要合作夥伴...（提取時會自動填入名片備註）">
+                </div>
+
+                <div id="pendingImgList" class="row g-3">
+                    <!-- 待處理名片圖檔將顯示於此 -->
+                </div>
+
+                <!-- done 目錄已歸檔檢視區 -->
+                <div class="mt-3 pt-3 border-top d-flex justify-content-between align-items-center">
+                    <button class="btn btn-sm btn-link text-decoration-none text-secondary p-0" type="button" id="toggleDoneBtn">
+                        📁 查看 <code>done/</code> 目錄已轉換名片 (<span id="doneCountBadge">0</span> 張) ▼
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary d-none" type="button" id="restoreAllBtn">
+                        ↩️ 將全部名片移回 img 目錄重新測試
+                    </button>
+                </div>
+                <div id="doneSection" class="mt-3 d-none">
+                    <div id="doneImgList" class="row g-2"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 區塊 2：手動輸入 / 編輯名片 -->
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center" id="manualFormToggle">
+                <h5 class="mb-0 fw-bold text-dark" id="formHeaderTitle">✍️ 手動輸入 / 新增名片</h5>
+                <button class="btn btn-sm btn-outline-primary" type="button" id="toggleManualBtn">展開 / 收合表單</button>
+            </div>
+            <div class="card-body" id="manualFormBody">
+                <form id="cardForm">
+                    <input type="hidden" id="editCardId" value="">
+                    <div class="row g-3">
+                        <div class="col-md-3">
+                            <label class="form-label small fw-semibold">姓名 (中文/日文) <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="name" placeholder="例如：紀 昆鵬" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-semibold">英文姓名</label>
+                            <input type="text" class="form-control" id="english_name" placeholder="例如：Jimmy">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-semibold">公司名稱</label>
+                            <input type="text" class="form-control" id="company" placeholder="例如：株式会社 セクションエイト">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-semibold">部門 / 職稱</label>
+                            <input type="text" class="form-control" id="title" placeholder="例如：社長室 室長">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-semibold">公司電話</label>
+                            <input type="tel" class="form-control" id="phone" placeholder="例如：03-6452-6688">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-semibold">個人電話 / 手機</label>
+                            <input type="tel" class="form-control" id="mobile" placeholder="例如：090-1234-5678">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-semibold">傳真 (FAX)</label>
+                            <input type="tel" class="form-control" id="fax" placeholder="例如：03-6452-6692">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-semibold">電子郵件</label>
+                            <input type="email" class="form-control" id="email" placeholder="例如：k.jimmy@section-8.jp">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-semibold">統一編號 (統編)</label>
+                            <input type="text" class="form-control" id="tax_id" placeholder="例如：83628366">
+                        </div>
+                        <div class="col-md-5">
+                            <label class="form-label small fw-semibold">公司地址</label>
+                            <input type="text" class="form-control" id="address" placeholder="例如：〒150-0011 東京都渋谷区東2-15-5 エスキナビル 2F">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold">公司網址</label>
+                            <input type="text" class="form-control" id="website" placeholder="例如：https://section-8.jp">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small fw-semibold">📝 備註 (Notes)</label>
+                            <textarea class="form-control" id="notes" rows="2" placeholder="輸入認識場合、合作項目、客戶偏好或待辦事項等備註資訊..."></textarea>
+                        </div>
+                        <div class="col-12">
+                            <div class="form-check form-switch d-inline-flex align-items-center gap-2 px-3 py-2 rounded-3 bg-warning-subtle border border-warning-subtle">
+                                <input class="form-check-input ms-0 mt-0" type="checkbox" role="switch" id="important" style="cursor: pointer;">
+                                <label class="form-check-label fw-semibold text-dark" for="important" style="cursor: pointer;">
+                                    ⭐ 標記為「重要」名片（只要標定為重要，即自動加入 Mac 電腦的「聯絡人」資訊）
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-3 d-flex justify-content-end gap-2">
+                        <button type="button" class="btn btn-secondary d-none" id="cancelEditBtn">取消編輯</button>
+                        <button type="submit" class="btn btn-primary px-4" id="submitCardBtn">➕ 新增至名片資料庫</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- 區塊 3：名片資料庫搜尋與列表 -->
+        <div class="card shadow-sm border-0 mb-4 bg-white">
+            <div class="card-body">
+                <div class="d-flex flex-wrap justify-content-between align-items-center mb-1 gap-2">
+                    <h4 class="mb-0 fw-bold d-flex align-items-center gap-2">
+                        <span>🗂️</span> 我的名片資料庫
+                        <span class="badge bg-secondary fs-6 fw-normal" id="searchResultCount">顯示 0 / 0 張</span>
+                    </h4>
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                        <span class="small text-muted d-none d-md-inline" id="mergeSelectionHint">勾選任意 2 張名片即可合併</span>
+                        <button type="button" class="btn btn-sm btn-outline-secondary d-none" id="clearCardSelectionBtn">
+                            ✕ 取消勾選
+                        </button>
+                        <button type="button" class="btn btn-sm btn-success fw-bold px-3" id="mergeSelectedCardsBtn" disabled>
+                            🔗 合併選取的名片 (<span id="mergeSelectedCount">0</span>/2)
+                        </button>
+                    </div>
+                </div>
+                <small class="text-muted d-block mb-3">
+                    💡 提示：點擊名片上的「<strong>☆ 標記重要</strong>」即可將名片標定為重要並自動同步至電腦「聯絡人」App；勾選左上角 <strong>2 張名片</strong> 則可合併名片。
+                </small>
+
+                <!-- 進階搜尋工具列 -->
+                <div class="row g-2 align-items-center">
+                    <div class="col-md-3 col-lg-2">
+                        <select class="form-select" id="searchFieldSelect">
+                            <option value="all">🔎 搜尋全部欄位</option>
+                            <option value="name">👤 姓名 (中/日/英)</option>
+                            <option value="company">🏢 公司名稱</option>
+                            <option value="tax_id">🧾 統一編號 (統編)</option>
+                            <option value="title">💼 部門 / 職稱</option>
+                            <option value="contact">📞 電話 / Email</option>
+                            <option value="address">📍 公司地址</option>
+                            <option value="notes">📝 備註內容</option>
+                        </select>
+                    </div>
+                    <div class="col-md-9 col-lg-10">
+                        <div class="input-group">
+                            <span class="input-group-text bg-white">🔍</span>
+                            <input type="text" class="form-control" id="searchInput" placeholder="輸入關鍵字即時搜尋姓名、公司、統編、電話、Email、地址或備註...">
+                            <button class="btn btn-outline-secondary d-none" type="button" id="clearSearchBtn">✕ 清除搜尋</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 公司快速篩選標籤 -->
+                <div class="mt-3 d-flex flex-wrap align-items-center gap-1" id="companyFilterBar">
+                    <!-- 動態產生公司快速篩選按鈕 -->
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-4" id="cardList">
+            <!-- 名片資料庫卡片將顯示於此 -->
+        </div>
+    </div>
+
+    <!-- 圖片放大預覽 Modal -->
+    <div id="imageModal" class="image-modal d-none" onclick="closeImageModal()">
+        <div class="image-modal-content" onclick="event.stopPropagation()">
+            <div class="d-flex justify-content-between align-items-center mb-2 text-white">
+                <span id="modalImageTitle" class="fw-bold"></span>
+                <button class="btn btn-sm btn-light" onclick="closeImageModal()">✕ 關閉</button>
+            </div>
+            <img id="modalImage" src="" alt="名片預覽" class="img-fluid rounded shadow">
+        </div>
+    </div>
+
+    <!-- 手動選取兩張名片合併 Modal -->
+    <div id="mergeCardsModal" class="conflict-modal-backdrop d-none">
+        <div class="conflict-modal-dialog card shadow-lg border-0" style="max-width: 860px;">
+            <div class="card-header bg-success-subtle border-bottom py-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="fs-4">🔗</span>
+                    <div>
+                        <h5 class="mb-0 fw-bold text-dark">合併兩張名片資料</h5>
+                        <small class="text-muted">系統已自動將兩張名片的欄位智慧合併（英文名置於中文名後、去除重複電話並保留所有來源圖檔），您也可於下方直接微調</small>
+                    </div>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-dark" id="swapMergeOrderBtn">
+                    ⇄ 對調主次順序
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="row g-3 mb-3" id="mergeCardsComparisonBody">
+                    <!-- 兩張選取的名片對照 -->
+                </div>
+                <div class="p-3 rounded-3 bg-light border">
+                    <div class="fw-bold text-success mb-2">✨ 合併後的最終名片資料（可直接修改微調）：</div>
+                    <div class="row g-2">
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold mb-1">姓名 (中/日/英合併)</label>
+                            <input type="text" class="form-control form-control-sm" id="merge_name">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold mb-1">英文姓名</label>
+                            <input type="text" class="form-control form-control-sm" id="merge_english_name">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold mb-1">統一編號 (統編)</label>
+                            <input type="text" class="form-control form-control-sm" id="merge_tax_id">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold mb-1">公司名稱</label>
+                            <input type="text" class="form-control form-control-sm" id="merge_company">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold mb-1">部門 / 職稱</label>
+                            <input type="text" class="form-control form-control-sm" id="merge_title">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold mb-1">公司電話</label>
+                            <input type="text" class="form-control form-control-sm" id="merge_phone">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold mb-1">個人電話 / 手機</label>
+                            <input type="text" class="form-control form-control-sm" id="merge_mobile">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold mb-1">傳真 (FAX)</label>
+                            <input type="text" class="form-control form-control-sm" id="merge_fax">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold mb-1">電子郵件</label>
+                            <input type="text" class="form-control form-control-sm" id="merge_email">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold mb-1">公司網址</label>
+                            <input type="text" class="form-control form-control-sm" id="merge_website">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small fw-semibold mb-1">公司地址</label>
+                            <input type="text" class="form-control form-control-sm" id="merge_address">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small fw-semibold mb-1">備註 (Notes)</label>
+                            <textarea class="form-control form-control-sm" id="merge_notes" rows="2"></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="card-footer bg-white py-3 d-flex justify-content-end gap-2">
+                <button type="button" class="btn btn-outline-secondary" id="cancelMergeModalBtn">✕ 取消</button>
+                <button type="button" class="btn btn-success fw-bold px-4" id="confirmMergeModalBtn">🔗 確認合併為一張名片</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 同人名片衝突提示 Modal (更新/新增欄位 vs 取代) -->
+    <div id="conflictModal" class="conflict-modal-backdrop d-none">
+        <div class="conflict-modal-dialog card shadow-lg border-0">
+            <div class="card-header bg-warning-subtle border-bottom py-3 d-flex justify-content-between align-items-center">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="fs-4">⚠️</span>
+                    <div>
+                        <h5 class="mb-0 fw-bold text-dark" id="conflictModalTitle">發現相同人員的名片資料</h5>
+                        <small class="text-muted" id="conflictModalSubtitle">資料庫中已有此人的名片，請選擇要「更新 / 新增欄位」還是「取代」</small>
+                    </div>
+                </div>
+                <span class="badge bg-dark d-none" id="conflictQueueBadge">1 / 1</span>
+            </div>
+            <div class="card-body">
+                <div class="row g-3" id="conflictComparisonBody">
+                    <!-- 左右對照表與合併預覽將動態渲染於此 -->
+                </div>
+                <div class="mt-3 p-2 rounded bg-light border small text-secondary">
+                    <div><strong>💡 選項說明（同一公司＋同一 Email 或同名視為同一人）：</strong></div>
+                    <div>• <strong>🔄 更新 / 新增欄位 (合併資料)</strong>：自動合併新欄位與雙語資訊；<strong>若名字不同，將自動合併名字欄位並將英文名字放在中文後面</strong>（例如：<code>劉淑惠 Marilyn Liu</code>）。</div>
+                    <div>• <strong>♻️ 取代 (完全覆蓋)</strong>：用新名片的資料<strong>完全覆蓋</strong>舊名片紀錄。</div>
+                    <div>• <strong>✕ 取消 / 略過</strong>：不修改資料庫，但名片圖檔仍會自動移至 <code>done/</code> 目錄。</div>
+                </div>
+            </div>
+            <div class="card-footer bg-white py-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
+                <div class="form-check d-none" id="applyAllConflictWrap">
+                    <input class="form-check-input" type="checkbox" id="applyAllConflictCheck">
+                    <label class="form-check-label small fw-semibold text-secondary" for="applyAllConflictCheck">
+                        套用到本次剩餘的所有同人名片
+                    </label>
+                </div>
+                <div class="d-flex flex-wrap gap-2 ms-auto">
+                    <button type="button" class="btn btn-outline-secondary" id="conflictSkipBtn">✕ 取消 / 略過</button>
+                    <button type="button" class="btn btn-outline-primary" id="conflictCreateNewBtn">➕ 仍新增為另一筆</button>
+                    <button type="button" class="btn btn-warning fw-bold" id="conflictReplaceBtn">♻️ 取代 (完全覆蓋)</button>
+                    <button type="button" class="btn btn-success fw-bold px-3" id="conflictUpdateBtn">🔄 更新 / 新增欄位 (合併)</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
