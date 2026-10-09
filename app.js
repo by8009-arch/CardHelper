@@ -842,10 +842,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 </div>
                             </div>
                         </div>
-                        <div class="mt-3 pt-2 border-top d-flex justify-content-between align-items-center">
-                            <span class="text-muted text-truncate me-2" style="font-size: 11px;" title="${escapeHtml(allSources.join(', '))}">
-                                ${allSources.length > 0 ? `📷 來源: ${escapeHtml(allSources.join(', '))}` : '✍️ 手動建立'}
-                            </span>
+                        <div class="mt-3 pt-2 border-top d-flex justify-content-end align-items-center">
                             <div class="d-flex gap-1 flex-shrink-0">
                                 <button type="button" class="btn btn-sm btn-outline-primary py-0 px-2 edit-card-btn">編輯全部</button>
                                 <button type="button" class="btn btn-sm btn-outline-danger py-0 px-2 delete-card-btn">刪除</button>

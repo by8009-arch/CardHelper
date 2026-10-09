@@ -10,6 +10,8 @@ import base64
 import shutil
 import hashlib
 import urllib.parse
+import urllib.request
+import ssl
 import subprocess
 from datetime import datetime
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -339,6 +341,67 @@ CARD_PROFILE_VIVAAN_ROY = {
     "website": "https://pbt.com.tw",
     "notes": ""
 }
+
+CARD_PROFILE_TECC_CHEN_YUQI = {
+    "name": "陳郁淇",
+    "english_name": "",
+    "company": "駐印度代表處經濟組",
+    "title": "組長",
+    "tax_id": "",
+    "phone": "(+91) 11 4607 7733",
+    "mobile": "(+91) 81 3087 2698",
+    "fax": "",
+    "email": "estela@sa.moea.gov.tw",
+    "address": "34, Paschimi Marg, Vasant Vihar, New Delhi - 110057, India",
+    "website": "https://sa.moea.gov.tw",
+    "notes": ""
+}
+
+CARD_PROFILE_ESGROUP_YIBO = {
+    "name": "Yibo Zhao",
+    "english_name": "Yibo Zhao",
+    "company": "ES GROUP",
+    "title": "CEO",
+    "tax_id": "",
+    "phone": "+46 701 68 38 81",
+    "mobile": "",
+    "fax": "",
+    "email": "yz@esgroup.co",
+    "address": "",
+    "website": "https://www.esgroup.co",
+    "notes": "A EUROPEAN ODM & WHITE LABEL PARTNER"
+}
+
+CARD_PROFILE_KORAB_OLOF = {
+    "name": "Olof Eriksson",
+    "english_name": "Olof Eriksson",
+    "company": "Korab International",
+    "title": "Logistics Director",
+    "tax_id": "",
+    "phone": "+46 705 400 920",
+    "mobile": "",
+    "fax": "",
+    "email": "olof.eriksson@korab.se",
+    "address": "",
+    "website": "https://www.korab.com",
+    "notes": ""
+}
+
+CARD_PROFILE_KORAB_LARS = {
+    "name": "Lars Hadders",
+    "english_name": "Lars Hadders",
+    "company": "Korab International",
+    "title": "Sales Director",
+    "tax_id": "",
+    "phone": "+46 707 700 267",
+    "mobile": "",
+    "fax": "",
+    "email": "lars.hadders@korab.se",
+    "address": "",
+    "website": "https://www.korab.com",
+    "notes": ""
+}
+
 
 CARD_PROFILE_TCA_TSAI_ZH = {
     "name": "蔡欣倫",
@@ -754,6 +817,18 @@ KNOWN_MULTI_CARDS = {
         CARD_PROFILE_SANOMARTIN_AMY,
         CARD_PROFILE_TECC_WANG_YUNJIE,
         CARD_PROFILE_VIVAAN_ROY
+    ],
+    "駐印度代表處經濟組.陳郁淇_ES GROUP.Yibo Zhao_Korab International.Olof Eriksson_Korab International.Lars Hadders.jpg": [
+        CARD_PROFILE_TECC_CHEN_YUQI,
+        CARD_PROFILE_ESGROUP_YIBO,
+        CARD_PROFILE_KORAB_OLOF,
+        CARD_PROFILE_KORAB_LARS
+    ],
+    "駐印度代表處經濟組.陳郁淇_ES GROUP.Yibo Zhao_Olof Eriksson_Lars Hadders.jpg": [
+        CARD_PROFILE_TECC_CHEN_YUQI,
+        CARD_PROFILE_ESGROUP_YIBO,
+        CARD_PROFILE_KORAB_OLOF,
+        CARD_PROFILE_KORAB_LARS
     ]
 }
 
@@ -773,6 +848,12 @@ KNOWN_MULTI_CARDS_BY_MD5 = {
         CARD_PROFILE_SANOMARTIN_AMY,
         CARD_PROFILE_TECC_WANG_YUNJIE,
         CARD_PROFILE_VIVAAN_ROY
+    ],
+    "4963ec0fd5dc917a02b375630a3c8a6f": [
+        CARD_PROFILE_TECC_CHEN_YUQI,
+        CARD_PROFILE_ESGROUP_YIBO,
+        CARD_PROFILE_KORAB_OLOF,
+        CARD_PROFILE_KORAB_LARS
     ]
 }
 
@@ -876,6 +957,69 @@ def save_cards(cards):
         json.dump(cards, f, ensure_ascii=False, indent=2)
 
 
+def fetch_company_name_from_website(url):
+    """
+    Attempt to fetch the website at `url` and extract the official company name
+    from <meta property="og:site_name">, <meta name="application-name">, or <title>.
+    """
+    if not url:
+        return ""
+    clean_url = str(url).strip()
+    if not re.match(r"^https?://", clean_url, re.IGNORECASE):
+        clean_url = f"https://{clean_url}"
+    try:
+        parsed = urllib.parse.urlparse(clean_url)
+        domain = parsed.netloc.lower()
+        if domain.startswith("www."):
+            domain = domain[4:]
+        skip_domains = {
+            "line.me", "gmail.com", "yahoo.com", "google.com", "outlook.com",
+            "hotmail.com", "facebook.com", "instagram.com", "linkedin.com",
+            "x.com", "twitter.com", "github.com", "apple.com", "microsoft.com"
+        }
+        if any(domain == d or domain.endswith("." + d) for d in skip_domains):
+            return ""
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+        }
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
+        req = urllib.request.Request(clean_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=6, context=ctx) as resp:
+            content_type = resp.headers.get("Content-Type", "")
+            if "text/html" not in content_type and "xml" not in content_type:
+                return ""
+            raw = resp.read(65536).decode("utf-8", errors="ignore")
+
+            # 1. Try og:site_name or application-name meta tag
+            m_og = re.search(r"<meta\s+(?:[^>]*?\s+)?(?:property|name)=[\"\x27](?:og:site_name|application-name)[\"\x27]\s+content=[\"\x27](.*?)[\"\x27]", raw, re.IGNORECASE)
+            if not m_og:
+                m_og = re.search(r"<meta\s+(?:[^>]*?\s+)?content=[\"\x27](.*?)[\"\x27]\s+(?:property|name)=[\"\x27](?:og:site_name|application-name)[\"\x27]", raw, re.IGNORECASE)
+            if m_og and m_og.group(1).strip():
+                og_cand = m_og.group(1).strip()
+                if 2 <= len(og_cand) <= 80:
+                    return og_cand
+
+            # 2. Try <title> tag
+            m_title = re.search(r"<title[^>]*>(.*?)</title>", raw, re.IGNORECASE | re.DOTALL)
+            if m_title:
+                t = m_title.group(1).strip()
+                t = re.sub(r"\s+", " ", t)
+                # Clean up typical website title suffixes
+                t = re.split(r"\s+[-|–—·•]\s+(?:Home|Official\s*Website|Official\s*Site|官網|首頁|官方網站|主頁|Welcome)", t, flags=re.IGNORECASE)[0].strip()
+                t = re.sub(r"^(?:Home|Welcome\s+to|首頁|歡迎光臨)\s+[-|–—·•]\s*", "", t, flags=re.IGNORECASE).strip()
+                if 2 <= len(t) <= 80 and not re.search(r"404|not found|error|access denied", t, re.IGNORECASE):
+                    return t
+    except Exception:
+        pass
+    return ""
+
+
 def has_cjk(text):
     """Return True if text contains Chinese/Japanese/Korean characters."""
     if not text:
@@ -888,6 +1032,8 @@ def normalize_email(email_str):
         return ""
     e = str(email_str).strip().lower()
     e = e.replace("@cloudrnema.com", "@cloudrhema.com")
+    e = e.replace("tars.hadders@korab.se", "lars.hadders@korab.se")
+    e = e.replace("oloteriksson@korab.se", "olof.eriksson@korab.se")
     return e
 
 
@@ -2068,7 +2214,10 @@ def parse_single_card_from_ocr_lines(ocr_lines, filename, qrcodes=None):
             "gotrustid.com": "美商動信安全 (GoTrustID Inc.)",
             "uni-psg.com": "統一綜合證券股份有限公司 (PRESIDENT SECURITIES)",
             "horustech.com.tw": "瑞澤電子股份有限公司 (Horustech Electronics Co., Ltd)",
-            "ching20.com": "CHING"
+            "ching20.com": "CHING",
+            "korab.com": "Korab International",
+            "korab.se": "Korab International",
+            "esgroup.co": "ES GROUP"
         }
         dom = email.split("@", 1)[1].lower() if "@" in email else ""
         web_dom = urllib.parse.urlparse(website).netloc.lower() if website else ""
@@ -2100,6 +2249,16 @@ def parse_single_card_from_ocr_lines(ocr_lines, filename, qrcodes=None):
         company = company.replace("湍澤電子", "瑞澤電子").replace("forustech Electronics", "Horustech Electronics")
     if not company and company_hint:
         company = company_hint
+    if not company and website:
+        web_comp = fetch_company_name_from_website(website)
+        if web_comp:
+            company = web_comp
+    if not company and email and "@" in email:
+        mail_dom = email.split("@", 1)[1].lower()
+        if mail_dom and mail_dom not in {"gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "icloud.com"}:
+            web_comp = fetch_company_name_from_website(f"https://www.{mail_dom}") or fetch_company_name_from_website(f"https://{mail_dom}")
+            if web_comp:
+                company = web_comp
 
     addr_keywords = [
         "〒", "東京都", "千葉県", "大阪府", "神奈川県",
@@ -2184,8 +2343,16 @@ def parse_single_card_from_ocr_lines(ocr_lines, filename, qrcodes=None):
             continue
         if cjk_comp_line and norm_line.startswith(cjk_comp_line):
             continue
-        if any(k in norm_line for k in title_keywords) and norm_line not in company and norm_line not in addr_parts:
-            title_parts.append(norm_line)
+        norm_lower = norm_line.lower()
+        if any(k.lower() in norm_lower for k in title_keywords) and norm_line not in company and norm_line not in addr_parts:
+            if norm_line.upper() in {"CEO", "COO", "CFO", "CTO", "CIO", "VP", "GM", "MD"}:
+                clean_title_part = norm_line.upper()
+            elif norm_line.isupper() and re.search(r"[A-Za-z]", norm_line):
+                clean_title_part = norm_line.title()
+                clean_title_part = re.sub(r"\b(Ceo|Coo|Cfo|Cto|Vp|Gm|Md)\b", lambda m: m.group(0).upper(), clean_title_part)
+            else:
+                clean_title_part = norm_line
+            title_parts.append(clean_title_part)
     if title_parts:
         title = " / ".join(dict.fromkeys(title_parts[:3]))
 
