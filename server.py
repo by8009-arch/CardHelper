@@ -768,7 +768,7 @@ CARD_FIELDS = [
     "name", "english_name", "company", "title", "tax_id",
     "phone", "mobile", "fax", "email",
     "address", "website", "notes",
-    "avatar_url", "social_profiles", "top_articles"
+    "avatar_url", "social_profiles", "top_articles", "company_insights"
 ]
 
 
@@ -1213,6 +1213,8 @@ def merge_card_update(existing_card, new_data):
         existing_card["social_profiles"] = cur_socials
     if new_data.get("top_articles"):
         existing_card["top_articles"] = new_data["top_articles"]
+    if new_data.get("company_insights"):
+        existing_card["company_insights"] = new_data["company_insights"]
 
     if new_data.get("important"):
         existing_card["important"] = True
@@ -1233,6 +1235,8 @@ def replace_card_data(existing_card, new_data):
     for field in CARD_FIELDS:
         if field in ("social_profiles", "top_articles"):
             existing_card[field] = new_data.get(field) or []
+        elif field == "company_insights":
+            existing_card[field] = new_data.get(field) or {}
         else:
             val = str(new_data.get(field, "")).strip()
             if field == "email" and val:
@@ -2683,20 +2687,14 @@ class CardHelperHandler(SimpleHTTPRequestHandler):
                 enrichment = search_enricher.enrich_card_data(target_card)
                 if enrichment.get("avatar_url"):
                     target_card["avatar_url"] = enrichment["avatar_url"]
-                if enrichment.get("source_avatar_url") and not target_card.get("avatar_url"):
+                elif enrichment.get("source_avatar_url") and not target_card.get("avatar_url"):
                     target_card["avatar_url"] = enrichment["source_avatar_url"]
-                if enrichment.get("social_profiles"):
-                    cur_socials = target_card.get("social_profiles")
-                    if not isinstance(cur_socials, list):
-                        cur_socials = []
-                    cur_urls = {s.get("url") for s in cur_socials if isinstance(s, dict) and s.get("url")}
-                    for sp in enrichment["social_profiles"]:
-                        if isinstance(sp, dict) and sp.get("url") and sp["url"] not in cur_urls:
-                            cur_socials.append(sp)
-                            cur_urls.add(sp["url"])
-                    target_card["social_profiles"] = cur_socials
-                if enrichment.get("top_articles"):
-                    target_card["top_articles"] = enrichment["top_articles"]
+
+                # 採用嚴格過濾後的最新社群帳號、代表文章與公司地標線索
+                target_card["social_profiles"] = enrichment.get("social_profiles", [])
+                target_card["top_articles"] = enrichment.get("top_articles", [])
+                target_card["company_insights"] = enrichment.get("company_insights", {})
+
                 target_card["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 save_cards(cards)
                 return self.send_json({

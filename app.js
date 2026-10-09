@@ -748,6 +748,25 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
     }
 
+    function renderCompanyInsights(insights) {
+        if (!insights || typeof insights !== 'object') return '';
+        const hasWeb = Boolean(insights.website_clues);
+        const hasLoc = Boolean(insights.location_clues);
+        const hasRev = Boolean(insights.review_clues);
+        if (!hasWeb && !hasLoc && !hasRev) return '';
+
+        return `
+            <div class="mt-2 pt-2 border-top">
+                <div class="fw-bold text-secondary small mb-1">🏢 公司與地標實體情報</div>
+                <div class="bg-light p-2 rounded-2 border d-flex flex-column gap-1" style="font-size: 11px; line-height: 1.4;">
+                    ${hasWeb ? `<div><span class="text-primary fw-semibold">🌐 官網/業務：</span>${escapeHtml(insights.website_clues)}</div>` : ''}
+                    ${hasLoc ? `<div><span class="text-success fw-semibold">📍 園區/地標：</span>${escapeHtml(insights.location_clues)}</div>` : ''}
+                    ${hasRev ? `<div><span class="text-warning-emphasis fw-semibold">⭐ 地圖/評價：</span>${escapeHtml(insights.review_clues)}</div>` : ''}
+                </div>
+            </div>
+        `;
+    }
+
     async function enrichCard(card, btnElement) {
         const origHtml = btnElement.innerHTML;
         btnElement.disabled = true;
@@ -772,11 +791,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const pCount = (enriched.social_profiles || []).length;
             const aCount = (enriched.top_articles || []).length;
             const hasAvatar = Boolean(enriched.avatar_url);
+            const ins = enriched.company_insights || {};
+            const hasInsights = Boolean(ins.website_clues || ins.location_clues || ins.review_clues);
 
             const summaryParts = [];
             if (hasAvatar) summaryParts.push('相片頭像');
             if (pCount > 0) summaryParts.push(`${pCount} 個社群帳號`);
             if (aCount > 0) summaryParts.push(`${aCount} 篇熱門報導`);
+            if (hasInsights) summaryParts.push('公司地標情報');
 
             const summaryStr = summaryParts.length > 0 ? summaryParts.join('、') : '資料已更新';
             showAlert(`🌐 已成功為「<strong>${escapeHtml(card.name)}</strong>」找到：${summaryStr}！`, 'success');
@@ -938,6 +960,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
                             <!-- 相關代表性報導與文章 -->
                             ${renderTopArticles(card.top_articles)}
+
+                            <!-- 公司與地標實體情報 -->
+                            ${renderCompanyInsights(card.company_insights)}
 
                             <!-- 備註顯示與快速編輯區塊 -->
                             <div class="mt-2 pt-1">

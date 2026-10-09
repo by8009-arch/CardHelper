@@ -177,6 +177,7 @@ def handle_tool_call(name, arguments):
                 "avatar_url": enrich_res.get("avatar_url") or target_card.get("avatar_url"),
                 "social_profiles": enrich_res.get("social_profiles", []),
                 "top_articles": enrich_res.get("top_articles", []),
+                "company_insights": enrich_res.get("company_insights", {}),
             })
             server.save_cards(cards)
             return {"ok": True, "card": target_card, "enriched": enrich_res}

@@ -170,6 +170,7 @@ def cardhelper_enrich(card_id: str):
                 "avatar_url": enrich_res.get("avatar_url") or target_card.get("avatar_url"),
                 "social_profiles": enrich_res.get("social_profiles", []),
                 "top_articles": enrich_res.get("top_articles", []),
+                "company_insights": enrich_res.get("company_insights", target_card.get("company_insights", {})),
             })
             server.save_cards(cards)
             return {"ok": True, "card": target_card, "enriched": enrich_res}
@@ -235,6 +236,19 @@ def format_card_summary_html(c: dict, idx: int = None) -> str:
             else:
                 art_items.append(f'   {a_idx}. {source_tag}{title_text}')
         lines.append("\n".join(art_items))
+
+    # 公司與地標實體情報 (company_insights)
+    insights = c.get("company_insights")
+    if isinstance(insights, dict) and any(insights.values()):
+        ins_lines = ["🏢 <b>公司與地標情報：</b>"]
+        if insights.get("website_clues"):
+            ins_lines.append(f"   🌐 官網/業務：{esc(insights['website_clues'])}")
+        if insights.get("location_clues"):
+            ins_lines.append(f"   📍 園區/地標：{esc(insights['location_clues'])}")
+        if insights.get("review_clues"):
+            ins_lines.append(f"   ⭐ 地圖/評價：{esc(insights['review_clues'])}")
+        if len(ins_lines) > 1:
+            lines.append("\n".join(ins_lines))
 
     lines.append(f"🆔 ID：<code>{esc(c.get('id', ''))}</code>")
     return "\n".join(lines)
