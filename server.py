@@ -22,12 +22,14 @@ SYMLINK_DONE = os.path.join(BASE_DIR, "done")
 CACHE_DIR = os.path.join(BASE_DIR, ".cache", "previews")
 DB_FILE = os.path.join(BASE_DIR, "cards_db.json")
 OCR_BINARY = os.path.join(BASE_DIR, "ocr_helper")
+AVATARS_DIR = os.path.join(BASE_DIR, "avatars")
 
 VALID_EXTS = {".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif", ".bmp", ".tiff"}
 
 os.makedirs(IMG_DIR, exist_ok=True)
 os.makedirs(DONE_DIR, exist_ok=True)
 os.makedirs(CACHE_DIR, exist_ok=True)
+os.makedirs(AVATARS_DIR, exist_ok=True)
 
 # Ensure symlink CardHelper/done -> img/done exists
 try:
@@ -765,7 +767,8 @@ ROTATE_90_CW_FILES = {
 CARD_FIELDS = [
     "name", "english_name", "company", "title", "tax_id",
     "phone", "mobile", "fax", "email",
-    "address", "website", "notes"
+    "address", "website", "notes",
+    "avatar_url", "social_profiles", "top_articles"
 ]
 
 
@@ -1196,6 +1199,21 @@ def merge_card_update(existing_card, new_data):
         elif not old_notes:
             existing_card["notes"] = new_notes
 
+    if new_data.get("avatar_url"):
+        existing_card["avatar_url"] = str(new_data["avatar_url"]).strip()
+    if new_data.get("social_profiles"):
+        cur_socials = existing_card.get("social_profiles")
+        if not isinstance(cur_socials, list):
+            cur_socials = []
+        cur_urls = {s.get("url") for s in cur_socials if isinstance(s, dict) and s.get("url")}
+        for sp in new_data["social_profiles"]:
+            if isinstance(sp, dict) and sp.get("url") and sp["url"] not in cur_urls:
+                cur_socials.append(sp)
+                cur_urls.add(sp["url"])
+        existing_card["social_profiles"] = cur_socials
+    if new_data.get("top_articles"):
+        existing_card["top_articles"] = new_data["top_articles"]
+
     if new_data.get("important"):
         existing_card["important"] = True
     if not existing_card.get("apple_contact_id") and new_data.get("apple_contact_id"):
@@ -1213,10 +1231,13 @@ def build_merged_preview(existing_card, new_data):
 def replace_card_data(existing_card, new_data):
     """Replace all fields of existing_card with new_data."""
     for field in CARD_FIELDS:
-        val = str(new_data.get(field, "")).strip()
-        if field == "email" and val:
-            val = normalize_email(val)
-        existing_card[field] = val
+        if field in ("social_profiles", "top_articles"):
+            existing_card[field] = new_data.get(field) or []
+        else:
+            val = str(new_data.get(field, "")).strip()
+            if field == "email" and val:
+                val = normalize_email(val)
+            existing_card[field] = val
     if "important" in new_data:
         existing_card["important"] = bool(new_data.get("important"))
     if new_data.get("source_file"):
@@ -2449,6 +2470,9 @@ class CardHelperHandler(SimpleHTTPRequestHandler):
         raw = self.rfile.read(length)
         return json.loads(raw.decode("utf-8"))
 
+    def do_HEAD(self):
+        self.do_GET()
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
@@ -2497,6 +2521,23 @@ class CardHelperHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(content)
             except Exception as e:
                 self.send_error(500, str(e))
+            return
+
+        if path == "/api/avatar":
+            card_id = query.get("id", [""])[0]
+            card_id = os.path.basename(card_id)
+            avatar_path = os.path.join(AVATARS_DIR, f"{card_id}.jpg")
+            if os.path.isfile(avatar_path):
+                with open(avatar_path, "rb") as f:
+                    content = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(content)))
+                self.send_header("Cache-Control", "public, max-age=86400")
+                self.end_headers()
+                self.wfile.write(content)
+            else:
+                self.send_error(404, "Avatar not found")
             return
 
         if path in ("/", "/index.html", "/app.js", "/style.css"):
@@ -2624,6 +2665,48 @@ class CardHelperHandler(SimpleHTTPRequestHandler):
                 "contacts_info": contacts_msg,
                 "contacts_sync": {"ok": contacts_ok, "message": contacts_msg},
             })
+
+        if (path.startswith("/api/cards/") and path.endswith("/enrich")) or path == "/api/cards/enrich":
+            if path == "/api/cards/enrich":
+                payload = self.read_json_body()
+                card_id = str(payload.get("id") or payload.get("card_id") or "").strip()
+            else:
+                card_id = path.split("/api/cards/", 1)[1].split("/enrich", 1)[0].strip()
+            if not card_id:
+                return self.send_json({"ok": False, "error": "缺少名片 ID"}, status=400)
+            cards = load_cards()
+            target_card = next((c for c in cards if c.get("id") == card_id), None)
+            if not target_card:
+                return self.send_json({"ok": False, "error": "找不到該名片"}, status=404)
+            try:
+                import search_enricher
+                enrichment = search_enricher.enrich_card_data(target_card)
+                if enrichment.get("avatar_url"):
+                    target_card["avatar_url"] = enrichment["avatar_url"]
+                if enrichment.get("source_avatar_url") and not target_card.get("avatar_url"):
+                    target_card["avatar_url"] = enrichment["source_avatar_url"]
+                if enrichment.get("social_profiles"):
+                    cur_socials = target_card.get("social_profiles")
+                    if not isinstance(cur_socials, list):
+                        cur_socials = []
+                    cur_urls = {s.get("url") for s in cur_socials if isinstance(s, dict) and s.get("url")}
+                    for sp in enrichment["social_profiles"]:
+                        if isinstance(sp, dict) and sp.get("url") and sp["url"] not in cur_urls:
+                            cur_socials.append(sp)
+                            cur_urls.add(sp["url"])
+                    target_card["social_profiles"] = cur_socials
+                if enrichment.get("top_articles"):
+                    target_card["top_articles"] = enrichment["top_articles"]
+                target_card["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                save_cards(cards)
+                return self.send_json({
+                    "ok": True,
+                    "card": target_card,
+                    "enrichment": enrichment,
+                    "cards": cards
+                })
+            except Exception as e:
+                return self.send_json({"ok": False, "error": f"網路探索失敗: {str(e)}"}, status=500)
 
         if path == "/api/cards":
             payload = self.read_json_body()

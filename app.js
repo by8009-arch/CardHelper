@@ -690,6 +690,103 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function getSocialPlatformBadge(profile) {
+        if (!profile || !profile.url) return '';
+        const platform = (profile.platform || '').toLowerCase();
+        const url = profile.url || '#';
+        let icon = '🔗';
+        let badgeClass = 'bg-secondary text-white';
+
+        if (platform.includes('linkedin')) {
+            icon = '💼';
+            badgeClass = 'bg-primary text-white';
+        } else if (platform.includes('facebook')) {
+            icon = '📘';
+            badgeClass = 'bg-primary text-white';
+        } else if (platform.includes('instagram')) {
+            icon = '📷';
+            badgeClass = 'bg-danger text-white';
+        } else if (platform.includes('twitter') || platform.includes('x')) {
+            icon = '𝕏';
+            badgeClass = 'bg-dark text-white';
+        } else if (platform.includes('github')) {
+            icon = '🐙';
+            badgeClass = 'bg-dark text-white';
+        } else if (platform.includes('threads')) {
+            icon = '🧵';
+            badgeClass = 'bg-dark text-white';
+        }
+
+        return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" class="badge text-decoration-none ${badgeClass} d-inline-flex align-items-center gap-1 py-1 px-2 me-1 mb-1 shadow-sm" style="font-size: 11px;" title="${escapeHtml(profile.title || url)}">
+            <span>${icon}</span>
+            <span>${escapeHtml(profile.platform || '社群')}</span>
+            ${profile.username ? `<span class="opacity-75">(@${escapeHtml(profile.username)})</span>` : ''}
+        </a>`;
+    }
+
+    function renderTopArticles(articles) {
+        if (!articles || !Array.isArray(articles) || articles.length === 0) return '';
+        return `
+            <div class="mt-2 pt-2 border-top">
+                <div class="fw-bold text-secondary small mb-1 d-flex align-items-center justify-content-between">
+                    <span>📰 相關熱門報導與代表文章 (${articles.length})</span>
+                </div>
+                <div class="d-flex flex-column gap-2">
+                    ${articles.map((art, idx) => `
+                        <div class="card-article-item small">
+                            <div class="d-flex align-items-center gap-1 mb-1">
+                                <span class="badge bg-secondary-subtle text-secondary border px-1" style="font-size: 10px;">${escapeHtml(art.source || '媒體')}</span>
+                                <a href="${escapeHtml(art.url)}" target="_blank" rel="noopener" class="fw-semibold text-primary text-decoration-none text-truncate flex-grow-1" title="${escapeHtml(art.title)}">
+                                    ${idx + 1}. ${escapeHtml(art.title)}
+                                </a>
+                            </div>
+                            ${art.snippet ? `<div class="text-muted text-truncate-2" style="font-size: 11px; line-height: 1.35;">${escapeHtml(art.snippet)}</div>` : ''}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    async function enrichCard(card, btnElement) {
+        const origHtml = btnElement.innerHTML;
+        btnElement.disabled = true;
+        btnElement.innerHTML = `<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>探索中...`;
+        try {
+            const res = await fetch(`/api/cards/${encodeURIComponent(card.id)}/enrich`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+                showAlert('網路探索失敗：' + (data.error || '無法取得資料'), 'danger');
+                btnElement.disabled = false;
+                btnElement.innerHTML = origHtml;
+                return;
+            }
+
+            cards = data.cards || [];
+            renderCards();
+
+            const enriched = data.enriched || {};
+            const pCount = (enriched.social_profiles || []).length;
+            const aCount = (enriched.top_articles || []).length;
+            const hasAvatar = Boolean(enriched.avatar_url);
+
+            const summaryParts = [];
+            if (hasAvatar) summaryParts.push('相片頭像');
+            if (pCount > 0) summaryParts.push(`${pCount} 個社群帳號`);
+            if (aCount > 0) summaryParts.push(`${aCount} 篇熱門報導`);
+
+            const summaryStr = summaryParts.length > 0 ? summaryParts.join('、') : '資料已更新';
+            showAlert(`🌐 已成功為「<strong>${escapeHtml(card.name)}</strong>」找到：${summaryStr}！`, 'success');
+        } catch (err) {
+            showAlert('探索過程發生錯誤：' + err.message, 'danger');
+            btnElement.disabled = false;
+            btnElement.innerHTML = origHtml;
+        }
+    }
+
     function renderCards() {
         dbCountBadge.textContent = `名片庫：${cards.length} 張`;
         renderCompanyFilters();
@@ -789,19 +886,31 @@ document.addEventListener('DOMContentLoaded', () => {
                             <div class="d-flex align-items-center gap-1 flex-wrap">
                                 ${countryBadgesHtml}
                                 ${allSources.length > 1 ? `<span class="badge bg-success-subtle text-success border border-success-subtle" style="font-size: 11px;">已合併 ${allSources.length} 張圖檔</span>` : ''}
+                                <button type="button" class="btn btn-sm py-0 px-2 fw-semibold enrich-card-btn btn-outline-info text-dark" style="font-size: 12px;" title="在網路上自動尋找個人社群帳號、相片與前3篇代表性熱門文章">
+                                    🌐 探索背景
+                                </button>
                                 <button type="button" class="btn btn-sm py-0 px-2 fw-semibold toggle-important-btn ${isImportant ? 'btn-warning text-dark shadow-sm' : 'btn-outline-warning text-dark'}" style="font-size: 12px;" title="${isImportant ? '點擊取消「重要」標記（並從電腦聯絡人移除）' : '標定為「重要」並自動加入電腦的聯絡人資訊'}">
                                     ${isImportant ? '⭐ 重要 (已入聯絡人)' : '☆ 標記重要'}
                                 </button>
                             </div>
                         </div>
                         <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
-                            <div>
-                                <h5 class="card-title text-primary fw-bold mb-1">
-                                    ${isImportant ? '<span title="重要名片">⭐</span> ' : ''}${highlightText(card.name || '（未填寫姓名）', q)}
-                                    ${showSeparateEng ? `<span class="text-secondary fs-6 fw-normal">(${highlightText(card.english_name, q)})</span>` : ''}
-                                </h5>
-                                <div class="text-dark fw-semibold small">${highlightText(card.company || '未填寫公司', q)}</div>
-                                ${card.title ? `<div class="text-muted small">${highlightText(card.title, q)}</div>` : ''}
+                            <div class="d-flex align-items-center gap-2">
+                                ${card.avatar_url ? `
+                                    <img src="${card.avatar_url}" class="card-avatar-img rounded-circle flex-shrink-0" alt="相片" title="點擊檢視個人照片 (${escapeHtml(card.name)})" onclick="openImageModal('${card.avatar_url}', '${escapeHtml(card.name)} 的相片')" onerror="this.style.display='none'">
+                                ` : `
+                                    <div class="card-avatar-placeholder rounded-circle border d-flex align-items-center justify-content-center text-muted flex-shrink-0" title="尚未探索個人相片">
+                                        👤
+                                    </div>
+                                `}
+                                <div>
+                                    <h5 class="card-title text-primary fw-bold mb-0">
+                                        ${isImportant ? '<span title="重要名片">⭐</span> ' : ''}${highlightText(card.name || '（未填寫姓名）', q)}
+                                        ${showSeparateEng ? `<span class="text-secondary fs-6 fw-normal">(${highlightText(card.english_name, q)})</span>` : ''}
+                                    </h5>
+                                    <div class="text-dark fw-semibold small mt-1">${highlightText(card.company || '未填寫公司', q)}</div>
+                                    ${card.title ? `<div class="text-muted small">${highlightText(card.title, q)}</div>` : ''}
+                                </div>
                             </div>
                             ${previewUrl ? `
                                 <img src="${previewUrl}" class="card-source-thumb flex-shrink-0" title="點擊查看原始名片圖檔 (${escapeHtml(card.source_file)})" onclick="openImageModal('${previewUrl}', '${escapeHtml(card.source_file)}')">
@@ -817,6 +926,19 @@ document.addEventListener('DOMContentLoaded', () => {
                             ${card.address ? `<div><strong>📍 公司地址：</strong>${highlightText(card.address, q)}</div>` : ''}
                             ${card.website ? `<div><strong>🌐 公司網址：</strong><a href="${escapeHtml(card.website)}" target="_blank" rel="noopener">${highlightText(card.website, q)}</a></div>` : ''}
                             
+                            <!-- 社群帳號連結 -->
+                            ${card.social_profiles && Array.isArray(card.social_profiles) && card.social_profiles.length > 0 ? `
+                                <div class="mt-2 pt-1">
+                                    <div class="fw-semibold text-secondary small mb-1">🔗 社群帳號：</div>
+                                    <div class="d-flex flex-wrap">
+                                        ${card.social_profiles.map(p => getSocialPlatformBadge(p)).join('')}
+                                    </div>
+                                </div>
+                            ` : ''}
+
+                            <!-- 相關代表性報導與文章 -->
+                            ${renderTopArticles(card.top_articles)}
+
                             <!-- 備註顯示與快速編輯區塊 -->
                             <div class="mt-2 pt-1">
                                 <div class="notes-display-area">
@@ -854,6 +976,13 @@ document.addEventListener('DOMContentLoaded', () => {
             mergeCheck.addEventListener('change', () => {
                 toggleMergeCardSelect(card.id);
             });
+
+            const enrichBtn = col.querySelector('.enrich-card-btn');
+            if (enrichBtn) {
+                enrichBtn.addEventListener('click', () => {
+                    enrichCard(card, enrichBtn);
+                });
+            }
 
             const impToggleBtn = col.querySelector('.toggle-important-btn');
             impToggleBtn.addEventListener('click', () => {

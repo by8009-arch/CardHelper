@@ -87,7 +87,41 @@
     "notes": "",
     "important": false,
     "source_file": "麗臺科技股份有限公司.侯剛平 Vincent Hou.jpg",
-    "created_at": "2026-10-08 23:44:49"
+    "created_at": "2026-10-08 23:44:49",
+    "avatar_url": "/api/avatar?id=1641cba0-c166-4720-b185-def90159f2b7",
+    "social_profiles": [
+      {
+        "platform": "LinkedIn",
+        "url": "https://www.linkedin.com/in/deidra-cheeks-merriwether-99a8712",
+        "username": "deidra-cheeks-merriwether-99a8712"
+      },
+      {
+        "platform": "Facebook",
+        "url": "https://www.facebook.com/leadtektaiwan/about",
+        "username": "leadtektaiwan"
+      }
+    ],
+    "top_articles": [
+      {
+        "title": "麗臺 (2465) 深度解析：Ai 算力與智慧醫療雙引擎，大訊肯微入主啟動新局 - 913 理財估測站",
+        "url": "https://uc913.com/stock-2465/",
+        "source": "uc913.com",
+        "snippet": "圖(1)個股筆記：2465 麗臺（圖片素材取自個股官網） 更新日期：2026 年 10 月 07 日 主要業務麗臺科技（Leadtek Research Inc.，股票代號：2465）成立於 1986 年，總部位於台灣新北市。公司早期以自有品牌 WinFast 在電腦多媒體與繪圖卡市場奠定基礎，歷經產業變革，現已成功轉型為結合人工智慧（AI）與智慧 ..."
+      },
+      {
+        "title": "2465 麗臺 即時新聞與重大訊息｜公司公告整理 | 股市智投",
+        "url": "https://www.stockintelli.com/stock/2465/news",
+        "source": "stockintelli.com",
+        "snippet": "查看 2465 麗臺 的相關即時新聞與重大訊息，包含 麗臺科技股份有限公司 財報公告、法說會、營收揭露與公司重要事件更新。 麗臺 的新聞與重大訊息分頁提供研究資料與歷史脈絡整理；目前資料更新時間以頁面標示的最新交易日與 2026-10-08 為準。"
+      },
+      {
+        "title": "從桌邊到資料中心，直擊麗臺在 Computex 2026 怎麼滿足代理式 Ai 落地新顯學 - Inside",
+        "url": "https://www.inside.com.tw/article/41516-LeadtekComputex2026",
+        "source": "INSIDE 硬塞的",
+        "snippet": "企業導入 AI 邁入新階段!因應資安疑慮、雲端降速與模型變動，企業算力需求正從雲端走向「地端落地」。麗臺科技於 COMPUTEX 2026 打造出一整條從工廠邊緣到資料中心的 AI 算力光譜，要助企業完美掌控代理式 AI 的核心機密與推論時效。"
+      }
+    ],
+    "updated_at": "2026-10-09 10:24:42"
   },
   {
     "id": "48a43ea8-89b4-4b80-ba4a-284dc9982e9f",

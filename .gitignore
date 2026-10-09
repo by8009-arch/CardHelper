@@ -14,3 +14,8 @@ img/*
 !img/done/
 img/done/*
 !img/done/.gitkeep
+
+# Ignore local downloaded personal avatars
+avatars/*
+!avatars/.gitkeep
+

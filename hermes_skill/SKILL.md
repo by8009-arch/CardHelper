@@ -82,3 +82,19 @@ python3 /Users/arraymac/Desktop/project/CardHelper/cardhelper_cli.py important "
 # 取消重要並從 macOS Contacts.app 移除
 python3 /Users/arraymac/Desktop/project/CardHelper/cardhelper_cli.py important "<card_id>" --off
 ```
+
+---
+
+## 4. 探索個人社群帳號、相片與熱門文章 (`enrich`)
+
+當使用者說「探索某人的社群」、「找某人的照片」或「查某人或公司的代表性文章」時：
+
+```bash
+# 探索指定名片或人員的 LinkedIn/FB/IG、下載相片頭像與提取前 3 篇熱門文章
+python3 /Users/arraymac/Desktop/project/CardHelper/cardhelper_cli.py enrich "<card_id 或 姓名>"
+```
+
+### HTTP API 呼叫方式：
+```bash
+curl -s -X POST "http://127.0.0.1:8765/api/cards/<card_id>/enrich"
+```

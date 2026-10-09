@@ -16,9 +16,12 @@ import os
 import re
 import sys
 import tempfile
+import time
 import urllib.parse
 import urllib.request
 from telegram import Update
+from telegram.constants import ParseMode
+from telegram.request import HTTPXRequest
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -151,6 +154,29 @@ def cardhelper_set_important(card_id: str, important: bool = True):
             return {"ok": False, "error": str(e2)}
 
 
+def cardhelper_enrich(card_id: str):
+    try:
+        return call_cardhelper_http("POST", f"/api/cards/{urllib.parse.quote(card_id)}/enrich", timeout=90)
+    except Exception:
+        try:
+            import server
+            import search_enricher
+            cards = server.load_cards()
+            target_card = next((c for c in cards if c.get("id") == card_id), None)
+            if not target_card:
+                return {"ok": False, "error": "找不到該名片"}
+            enrich_res = search_enricher.enrich_card_data(target_card)
+            target_card.update({
+                "avatar_url": enrich_res.get("avatar_url") or target_card.get("avatar_url"),
+                "social_profiles": enrich_res.get("social_profiles", []),
+                "top_articles": enrich_res.get("top_articles", []),
+            })
+            server.save_cards(cards)
+            return {"ok": True, "card": target_card, "enriched": enrich_res}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+
 def format_card_summary_html(c: dict, idx: int = None) -> str:
     prefix = f"【名片 #{idx}】" if idx is not None else "📇 "
     star = "⭐ <b>[重要 / 已同步聯絡人]</b>" if c.get("important") else "☆ [一般]"
@@ -183,6 +209,33 @@ def format_card_summary_html(c: dict, idx: int = None) -> str:
         lines.append(f"🌐 網站：{esc(c['website'])}")
     if c.get("notes"):
         lines.append(f"📝 備註：{esc(c['notes'])}")
+
+    # 社群帳號
+    if c.get("social_profiles") and isinstance(c["social_profiles"], list):
+        sp_links = []
+        for p in c["social_profiles"]:
+            plat = p.get("platform", "Link")
+            url = p.get("url", "")
+            uname = f" (@{p['username']})" if p.get("username") else ""
+            if url:
+                sp_links.append(f'<a href="{esc(url)}">{esc(plat)}</a>{esc(uname)}')
+            else:
+                sp_links.append(f'{esc(plat)}{esc(uname)}')
+        if sp_links:
+            lines.append(f"🔗 社群帳號：{' | '.join(sp_links)}")
+
+    # 代表熱門文章
+    if c.get("top_articles") and isinstance(c["top_articles"], list) and len(c["top_articles"]) > 0:
+        art_items = ["📰 <b>代表熱門報導與文章：</b>"]
+        for a_idx, art in enumerate(c["top_articles"][:3], start=1):
+            source_tag = f"[{esc(art['source'])}] " if art.get("source") else ""
+            title_text = esc(art.get("title") or "相關新聞報導")
+            if art.get("url"):
+                art_items.append(f'   {a_idx}. {source_tag}<a href="{esc(art["url"])}">{title_text}</a>')
+            else:
+                art_items.append(f'   {a_idx}. {source_tag}{title_text}')
+        lines.append("\n".join(art_items))
+
     lines.append(f"🆔 ID：<code>{esc(c.get('id', ''))}</code>")
     return "\n".join(lines)
 
@@ -205,7 +258,10 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "   • 或輸入 <code>/search 關鍵字</code>、<code>/cards</code>\n"
         "3️⃣ <b>標記重要並加入 Mac 聯絡人</b>：\n"
         "   • 例如：「<code>把侯剛平標記為重要</code>」、「<code>把這張標記為重要</code>」\n"
-        "   • 或輸入 <code>/important 姓名或ID</code>"
+        "   • 或輸入 <code>/important 姓名或ID</code>\n"
+        "4️⃣ <b>探索個人社群帳號、相片與代表文章</b>：\n"
+        "   • 例如：「<code>探索侯剛平的背景</code>」、「<code>查侯剛平的社群和文章</code>」\n"
+        "   • 或輸入 <code>/enrich 姓名或ID</code>（自動搜尋 LinkedIn/FB/IG、下載頭像相片與 3 篇點閱最高文章）"
     )
     await safe_reply_html(update.message, msg)
 
@@ -273,6 +329,64 @@ async def important_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     else:
         await safe_reply_html(update.message, f"❌ 標記失敗：{esc(imp_res.get('error', '未知錯誤'))}")
+
+
+async def enrich_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    target = " ".join(context.args).strip() if context.args else ""
+    chat_id = update.effective_chat.id
+    card_id = None
+    target_card = None
+
+    if not target and chat_id in LAST_CARD_BY_CHAT:
+        card_id = LAST_CARD_BY_CHAT[chat_id]
+    elif target:
+        res = await asyncio.to_thread(cardhelper_search, target, False)
+        cards = res.get("cards", [])
+        if cards:
+            target_card = cards[0]
+            card_id = target_card.get("id")
+        else:
+            card_id = target
+
+    if not card_id:
+        await safe_reply_html(
+            update.message,
+            "⚠️ 請提供要探索社群與文章的姓名或名片 ID，例如：<code>/enrich 侯剛平</code>",
+        )
+        return
+
+    name_label = (target_card and target_card.get("name")) or target or card_id
+    status_msg = await update.message.reply_text(
+        f"🌐 正在為「{name_label}」搜尋個人社群帳號（LinkedIn/FB/IG等）、照片與代表性熱門文章..."
+    )
+
+    enrich_res = await asyncio.to_thread(cardhelper_enrich, card_id)
+    if not enrich_res.get("ok"):
+        await safe_edit_html(status_msg, f"❌ 探索失敗：{esc(enrich_res.get('error', '未知錯誤'))}")
+        return
+
+    card = enrich_res.get("card") or target_card or {}
+    LAST_CARD_BY_CHAT[chat_id] = card.get("id", card_id)
+
+    avatar_path = os.path.join(BASE_DIR, "avatars", f"{card_id}.jpg")
+    summary_text = f"✨ <b>已完成「{esc(card.get('name', name_label))}」的網路探索！</b>\n\n{format_card_summary_html(card)}"
+
+    if os.path.exists(avatar_path):
+        try:
+            await status_msg.delete()
+            with open(avatar_path, "rb") as photo_file:
+                await update.message.reply_photo(
+                    photo=photo_file,
+                    caption=summary_text[:1024],
+                    parse_mode=ParseMode.HTML,
+                )
+            if len(summary_text) > 1024:
+                await update.message.reply_html(summary_text[1024:])
+            return
+        except Exception as e:
+            logger.warning("Failed to send avatar photo: %s", e)
+
+    await safe_edit_html(status_msg, summary_text)
 
 
 async def handle_photo_or_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -363,7 +477,38 @@ def detect_and_run_cardhelper_intent(user_text: str, chat_id: int):
         )
         return True, msg
 
-    # 2. 把某人或剛剛那張名片標記為重要 / 加入聯絡人
+    # 2. 探索某人的社群、照片與代表文章 (enrich)
+    if any(k in text for k in ["社群", "照片", "相片", "文章", "報導", "背景", "探索", "enrich"]):
+        if any(v in text for v in ["查", "找", "探索", "搜尋", "看", "抓", "找出", "搜"]):
+            cleaned = re.sub(
+                r"(請|幫我|查一下|找一下|探索一下|看一下|查|找|探索|搜尋|搜|抓|找出|看|的|個人|社群帳號|社群|帳號|照片|相片|文章|報導|代表文章|代表性文章|點閱率最高|最高點閱|背景|資料|名片|一下|吧|！|。|\s)+",
+                "",
+                text,
+            )
+            target_card = None
+            card_id = None
+            if cleaned:
+                res = cardhelper_search(cleaned, False)
+                if res.get("cards"):
+                    target_card = res["cards"][0]
+                    card_id = target_card.get("id")
+            if not card_id and chat_id in LAST_CARD_BY_CHAT:
+                card_id = LAST_CARD_BY_CHAT[chat_id]
+            if not card_id:
+                latest_res = cardhelper_search("", False)
+                if latest_res.get("cards"):
+                    target_card = latest_res["cards"][0]
+                    card_id = target_card.get("id")
+
+            if card_id:
+                enrich_res = cardhelper_enrich(card_id)
+                if enrich_res.get("ok"):
+                    card = enrich_res.get("card") or target_card or {}
+                    LAST_CARD_BY_CHAT[chat_id] = card.get("id", card_id)
+                    return True, f"🌐 <b>已完成「{esc(card.get('name', '名片'))}」的背景與社群探索！</b>\n\n{format_card_summary_html(card)}"
+                return True, f"❌ 探索失敗：{esc(enrich_res.get('error', '未知錯誤'))}"
+
+    # 3. 把某人或剛剛那張名片標記為重要 / 加入聯絡人
     if any(k in text for k in ["標記為重要", "標記重要", "標定重要", "設為重要", "加入聯絡人", "加到聯絡人", "同步到聯絡人", "取消重要"]):
         turn_on = "取消" not in text
         cleaned = re.sub(
@@ -528,7 +673,14 @@ async def chat_with_agent(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
-    application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    t_request = HTTPXRequest(
+        connection_pool_size=16,
+        read_timeout=60.0,
+        write_timeout=60.0,
+        connect_timeout=30.0,
+        pool_timeout=30.0,
+    )
+    application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).request(t_request).build()
 
     application.add_handler(CommandHandler("start", start_cmd))
     application.add_handler(CommandHandler("help", start_cmd))
@@ -537,13 +689,21 @@ def main():
     application.add_handler(CommandHandler("cards", cards_cmd))
     application.add_handler(CommandHandler("list", cards_cmd))
     application.add_handler(CommandHandler("important", important_cmd))
+    application.add_handler(CommandHandler("enrich", enrich_cmd))
+    application.add_handler(CommandHandler("explore", enrich_cmd))
 
     # 支援直接傳送照片或圖片檔案
     application.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_photo_or_image))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), chat_with_agent))
 
     logger.info("CardHelper x Hermes Telegram Bot 正在運行...")
-    application.run_polling(drop_pending_updates=True)
+    while True:
+        try:
+            application.run_polling(drop_pending_updates=True, poll_interval=1.0)
+            break
+        except Exception as e:
+            logger.warning("Polling encountered error: %s. Retrying in 3 seconds...", e)
+            time.sleep(3)
 
 
 if __name__ == "__main__":
