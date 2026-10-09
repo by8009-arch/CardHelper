@@ -149,9 +149,29 @@ def search_web_images(query: str, max_results: int = 15) -> list:
 # 1. 社群帳號嚴格過濾判斷 (Strict Social Profile Relevance)
 # =========================================================================
 
-def is_social_profile_relevant(url_raw: str, title: str, snippet: str, name: str, english_name: str, company: str, title_on_card: str = "") -> tuple:
+DISALLOWED_ENTERTAINMENT_SIGNALS = [
+    "歌手", "女歌手", "男歌手", "藝人", "演藝", "唱片", "專輯", "演唱會", "單曲",
+    "金曲獎", "奧斯卡", "奥斯卡", "好心情", "滴答滴", "月光愛人", "想你的365天", "di da di",
+    "華語天后", "歌壇", "新秀歌唱", "抑鬱症", "輕生", "逝世", "自殺", "李美林", "ferren lee",
+    "singer", "pop star", "vocalist", "actress", "actor", "album", "song", "billboard",
+    "oscars", "academy award", "concert", "celebrity", "discography", "died by suicide",
+    "depression", "grammy"
+]
+
+
+def token_in_text(tok: str, text: str) -> bool:
+    """精確比對關鍵字（短英文單詞使用單詞邊界 \b，避免 Brian Ching 誤中 CHING）"""
+    if not tok or not text:
+        return False
+    if len(tok) <= 5 and re.match(r'^[a-zA-Z0-9]+$', tok):
+        return bool(re.search(r'\b' + re.escape(tok.lower()) + r'\b', text.lower()))
+    return tok.lower() in text.lower()
+
+
+def is_social_profile_relevant(url_raw: str, title: str, snippet: str, name: str, english_name: str, company: str, title_on_card: str = "", website: str = "") -> tuple:
     """
     嚴格檢驗此社群網址是否「真正屬於名片上的本人」：
+    - 嚴防同名名人/歌手混淆 (如 Coco Lee 混淆為歌手李玟)。
     - 排除同名同姓但公司/職業/地區衝突的他國他人 (例如香港學生、新加坡醫學生等)。
     - 排除純公司官方粉專 (如 leadtektaiwan) 冒充個人帳號。
     回傳 (is_valid: bool, platform: str, username: str)
@@ -162,6 +182,12 @@ def is_social_profile_relevant(url_raw: str, title: str, snippet: str, name: str
 
     platform = ""
     username = ""
+
+    # 娛樂/名人/歌手排除 (若名片不是娛樂從業者，嚴防混入同名名人/歌手)
+    if any(sig in combined_text for sig in DISALLOWED_ENTERTAINMENT_SIGNALS):
+        return False, "", ""
+    if "李玟" not in name and "李玟" in combined_text:
+        return False, "", ""
 
     # 辨識平台
     if "linkedin.com/in/" in lower_url:
@@ -231,7 +257,7 @@ def is_social_profile_relevant(url_raw: str, title: str, snippet: str, name: str
                 english_matched = True
         elif len(eng_parts) == 1:
             single_eng = eng_parts[0]
-            has_comp_in_text = any(t in combined_text for t in comp_tokens) if comp_tokens else False
+            has_comp_in_text = any(token_in_text(t, combined_text) for t in comp_tokens) if comp_tokens else False
             if single_eng in combined_text and (chinese_matched or has_comp_in_text):
                 english_matched = True
 
@@ -239,29 +265,36 @@ def is_social_profile_relevant(url_raw: str, title: str, snippet: str, name: str
         return False, "", ""
 
     # 2. 嚴格防止同名同姓非本人（若名片有指定公司，社群中必須有公司/職稱/產業關聯線索）
-    if comp_tokens:
-        has_company_overlap = any(t in combined_text for t in comp_tokens)
-        has_title_overlap = False
-        if title_on_card:
-            t_tokens = [tok for tok in re.split(r"[\s/]+", title_on_card) if len(tok) >= 2]
-            has_title_overlap = any(tok.lower() in combined_text for tok in t_tokens)
+    web_domain = urllib.parse.urlparse(website).netloc.lower().replace("www.", "") if website else ""
 
-        # 檢查是否有明顯衝突的地區或身分（如名片在台灣，但檔案是香港某大學學生、中醫師等）
-        conflict_signals = ["曾就读于", "学生", "醫德網", "中醫師", "診所", "小學", "中學"]
-        has_conflict = any(cs in combined_text for cs in conflict_signals)
+    has_company_overlap = any(token_in_text(t, combined_text) for t in comp_tokens) if comp_tokens else False
+    if web_domain and web_domain in combined_text:
+        has_company_overlap = True
 
-        # 若同時具備中文與英文名 (如 Vincent Hou)，信任度極高；
-        # 但若只有中文名 (如 林志恒)，且沒有任何公司/職稱線索，甚至有衝突身分，果斷略過！
-        if not (has_company_overlap or has_title_overlap):
-            if not english_matched:
-                return False, "", ""
-            if has_conflict:
-                return False, "", ""
+    has_title_overlap = False
+    if title_on_card:
+        t_tokens = [tok for tok in re.split(r"[\s/]+", title_on_card) if len(tok) >= 2]
+        has_title_overlap = any(token_in_text(tok.lower(), combined_text) for tok in t_tokens)
+
+    # 檢查是否有明顯衝突的地區或身分（如名片在台灣，但檔案是香港某大學學生、中醫師等）
+    conflict_signals = ["曾就读于", "学生", "醫德網", "中醫師", "診所", "小學", "中學"]
+    has_conflict = any(cs in combined_text for cs in conflict_signals)
+
+    # 若是純英文姓名（沒有中文名，如 Coco Lee），且名片有公司或職稱，則絕不允許在缺乏公司/職稱/官網關聯下隨意匹配！
+    if not chinese_matched:
+        if comp_tokens and not (has_company_overlap or has_title_overlap):
+            return False, "", ""
+
+    if not (has_company_overlap or has_title_overlap):
+        if not english_matched:
+            return False, "", ""
+        if has_conflict:
+            return False, "", ""
 
     return True, platform, username
 
 
-def find_social_profiles(name: str, english_name: str = "", company: str = "", title_on_card: str = "") -> list:
+def find_social_profiles(name: str, english_name: str = "", company: str = "", title_on_card: str = "", website: str = "") -> list:
     """
     搜尋該人員的個人社群帳號，並執行嚴格相關性過濾。
     若相關性不足則略過，不強求輸出。
@@ -273,15 +306,22 @@ def find_social_profiles(name: str, english_name: str = "", company: str = "", t
     c_name = name.strip()
     c_eng = english_name.strip()
     c_comp = clean_query_term(company)
+    has_chinese_name = len(re.sub(r"[^\u4e00-\u9fff]", "", c_name)) >= 2
+    web_domain = urllib.parse.urlparse(website).netloc.lower().replace("www.", "") if website else ""
 
     queries = []
     if c_eng and c_comp:
-        queries.append(f'{c_eng} {c_comp} linkedin')
-        queries.append(f'{c_eng} {c_comp}')
+        queries.append(f'"{c_eng}" "{c_comp}" linkedin')
+        queries.append(f'"{c_eng}" "{c_comp}"')
     if c_name and c_comp:
         queries.append(f'"{c_name}" "{c_comp}" linkedin')
         queries.append(f'"{c_name}" "{c_comp}"')
-    if c_name:
+    if web_domain and (c_name or c_eng):
+        term = c_name or c_eng
+        queries.append(f'"{term}" "{web_domain}"')
+
+    # 只有具備中文姓名時，才可進行單純人名 LinkedIn 搜尋；純英文名字（如 Coco Lee）絕不進行單獨搜尋
+    if has_chinese_name:
         queries.append(f'"{c_name}" site:linkedin.com/in')
 
     for q in queries:
@@ -290,7 +330,7 @@ def find_social_profiles(name: str, english_name: str = "", company: str = "", t
             raw_url = it.get("url", "")
             title = it.get("title", "")
             snippet = it.get("snippet", "")
-            is_valid, plat, uname = is_social_profile_relevant(raw_url, title, snippet, c_name, c_eng, c_comp, title_on_card)
+            is_valid, plat, uname = is_social_profile_relevant(raw_url, title, snippet, c_name, c_eng, c_comp, title_on_card, website)
             if is_valid and plat not in seen_platforms:
                 clean_u = raw_url.split("?")[0].rstrip("/")
                 if clean_u not in seen_urls:
@@ -311,25 +351,34 @@ def find_social_profiles(name: str, english_name: str = "", company: str = "", t
 # 2. 代表性文章嚴格篩選 (Strict Article Relevance)
 # =========================================================================
 
-def score_article_relevance(url: str, title: str, snippet: str, name: str, english_name: str, company: str, title_on_card: str = "") -> tuple:
+def score_article_relevance(url: str, title: str, snippet: str, name: str, english_name: str, company: str, title_on_card: str = "", website: str = "") -> tuple:
     """
     評估文章是否具備高代表性與實質相關度：
+    - 嚴防同名名人/歌手混淆 (如 Coco Lee 混淆為歌手李玟)。
     - 排除：股票跳動行情、求職徵才、商工登記、無關論壇、成人/農場網站。
-    - 排除：同名但職業/專業完全不合者 (如中醫、策展人、演藝八卦)。
+    - 排除：同名但職業/專業完全不合者 (如中醫、策展人、演藝八卦、歌手)。
     - 計分：本人具名報導給予最高分，次為公司重要發表/展覽/獲獎/專訪。
     - 門檻：低於 60 分者判定為無關文章，回傳 False。
     """
     u_lower = url.lower()
     t_norm = normalize_cjk_spaces(title).lower()
     s_norm = normalize_cjk_spaces(snippet).lower()
-    comb = f"{t_norm} {s_norm}"
+    comb = f"{t_norm} {s_norm} {u_lower}"
 
-    # 1. 網域黑名單 (徵才、黃頁、登記、行情跳動表)
+    # 娛樂/名人/歌手排除 (若名片不是娛樂從業者，嚴防混入同名名人/歌手)
+    if any(sig in comb for sig in DISALLOWED_ENTERTAINMENT_SIGNALS):
+        return False, 0, ""
+    if "李玟" not in name and "李玟" in comb:
+        return False, 0, ""
+
+    # 1. 網域黑名單 (徵才、黃頁、登記、行情跳動表、八卦農場、音樂串流)
     exclude_domains = [
         "104.com.tw", "1111.com.tw", "518.com.tw", "yes123.com.tw", "cakeresume.com",
         "twincn.com", "findcompany.com.tw", "opengovtw.com", "datagovtw.com", "gcis.nat.gov.tw",
         "linkedin.com", "facebook.com", "instagram.com", "twitter.com", "x.com", "youtube.com",
-        "goodjob.life", "interview.tw", "qollie.com", "art-mate.net", "edr.hk"
+        "goodjob.life", "interview.tw", "qollie.com", "art-mate.net", "edr.hk", "kknews.cc",
+        "starsunfolded.com", "tempb.com", "music.apple.com", "spotify.com", "kkbox.com",
+        "soundcloud.com", "streetvoice.com"
     ]
     if any(ex in u_lower for ex in exclude_domains):
         return False, 0, ""
@@ -343,12 +392,19 @@ def score_article_relevance(url: str, title: str, snippet: str, name: str, engli
     unrelated_professions = ["中醫", "中醫師", "診所", "策展人", "藝術家", "演員", "歌手", "藝人", "編劇", "導演", "婦產科"]
     if any(bp in comb for bp in unrelated_professions):
         # 除非內文明顯包含名片公司
-        if not any(t.lower() in comb for t in extract_company_tokens(company)):
+        if not any(token_in_text(t, comb) for t in extract_company_tokens(company)):
             return False, 0, ""
 
     c_name = re.sub(r"[^\u4e00-\u9fff]", "", name.strip())
     c_eng = english_name.strip().lower()
     comp_tokens = [t.lower() for t in extract_company_tokens(company)]
+    web_domain = urllib.parse.urlparse(website).netloc.lower().replace("www.", "") if website else ""
+
+    # 純英文名（無中文名）且有指定公司時，若文章完全未提及公司或官網，判定為同名他人，直接略過！
+    if len(c_name) < 2 and comp_tokens:
+        has_comp_hit = any(token_in_text(t, comb) for t in comp_tokens) or (web_domain and web_domain in comb)
+        if not has_comp_hit:
+            return False, 0, ""
 
     score = 0
     reason = []
@@ -364,35 +420,70 @@ def score_article_relevance(url: str, title: str, snippet: str, name: str, engli
         person_hit = True
         reason.append("內文提及本人")
 
-    if c_eng and len(c_eng) >= 4 and c_eng in t_norm:
+    if c_eng and len(c_eng) >= 4 and token_in_text(c_eng, t_norm):
         score += 90
         person_hit = True
         reason.append("標題提及英文名")
-    elif c_eng and len(c_eng) >= 4 and c_eng in s_norm:
+    elif c_eng and len(c_eng) >= 4 and token_in_text(c_eng, s_norm):
         score += 65
         person_hit = True
         reason.append("內文提及英文名")
 
     # 若命中人名，但有公司名片時，須確認是否具備公司/職稱/產業相關性
     if person_hit and comp_tokens:
-        has_comp = any(t in comb for t in comp_tokens)
-        has_industry = any(ind in comb for ind in ["電子", "科技", "半導體", "產品", "軟體", "經理", "總裁", "執行長", "副總", "研發", "技術"])
-        if not (has_comp or has_industry):
-            # 僅是路人同名新聞（例如地方犯罪、同名演藝等），扣除分數
-            score -= 50
+        has_comp = any(token_in_text(t, comb) for t in comp_tokens) or (web_domain and web_domain in comb)
+        if not has_comp:
+            if len(c_name) < 2:
+                # 純英文名若未提及名片公司，直接視為同名名人/路人，果斷排除
+                return False, 0, ""
+            has_industry = any(ind in comb for ind in ["電子", "科技", "半導體", "產品", "軟體", "經理", "總裁", "執行長", "副總", "研發", "技術", "會所", "商務"])
+            if not has_industry:
+                score -= 50
+
+    # 哲學/占卜/古籍/口語狀聲詞排除 (防 I Ching 易經, Tao Te Ching 道德經, Ka-Ching)
+    cultural_false_positives = [
+        "i ching", "i-ching", "iching", "tao te ching", "daodejing", "hexagram",
+        "ka-ching", "易經", "道德經", "算命", "占卜", "八卦", "六十四卦", "紫微斗數"
+    ]
+    if any(cfp in comb for cfp in cultural_false_positives):
+        return False, 0, ""
+
+    # 檢查是否為其他複合名稱公司 (如 CHING FENG 慶豐富、CHING CHENG 慶成、CHING CHERN 敬程，非名片上單獨的 CHING)
+    if len(comp_tokens) == 1 and len(comp_tokens[0]) <= 6 and re.match(r'^[a-zA-Z0-9]+$', comp_tokens[0]):
+        single_tok = comp_tokens[0].lower()
+        compound_matches = re.findall(r'\b' + re.escape(single_tok) + r'\s+([a-zA-Z\u4e00-\u9fff]+)', t_norm)
+        for cm in compound_matches:
+            if cm.lower() not in ["co", "ltd", "corp", "inc", "group", "company", "firm", "technologies", "international", "會所", "商務", "服務"]:
+                return False, 0, ""
 
     # 情況 B：文章與名片公司高度相關
-    comp_in_title = any(t in t_norm for t in comp_tokens) if comp_tokens else False
-    comp_in_snippet = any(t in s_norm for t in comp_tokens) if comp_tokens else False
+    comp_context_indicators = [
+        "公司", "企業", "集團", "會所", "品牌", "科技", "電子", "co.", "ltd", "corp", "inc",
+        "company", "firm", "經理", "總裁", "執行長", "董事長", "創辦人", "營收", "發表", "融資"
+    ]
+    has_comp_corporate_context = any(ind in comb for ind in comp_context_indicators) or (web_domain and web_domain in comb)
+
+    comp_in_title = False
+    comp_in_snippet = False
+    if comp_tokens:
+        for t in comp_tokens:
+            is_short_latin = len(t) <= 6 and re.match(r'^[a-zA-Z0-9]+$', t)
+            # 若為短英文字詞 (如 CHING)，必須同時具備公司/企業語境或官方網域，否則不可視為公司命中
+            if is_short_latin and not has_comp_corporate_context:
+                continue
+            if token_in_text(t, t_norm):
+                comp_in_title = True
+            if token_in_text(t, s_norm):
+                comp_in_snippet = True
 
     # 專業新聞情境字眼
     context_words = ["專訪", "發表", "營收", "新產品", "推出", "ai", "展覽", "computex", "技術", "董事長", "總經理", "合作", "併購", "獲獎", "佈局", "亮相", "首度"]
     has_news_context = any(w in comb for w in context_words)
 
     if comp_in_title:
-        score += 60
+        score += 45
         if has_news_context:
-            score += 20
+            score += 25
         reason.append("標題含公司名")
     elif comp_in_snippet and has_news_context:
         score += 50
@@ -405,7 +496,7 @@ def score_article_relevance(url: str, title: str, snippet: str, name: str, engli
     return True, score, "、".join(reason)
 
 
-def find_top_articles(name: str, english_name: str = "", company: str = "", title_on_card: str = "") -> list:
+def find_top_articles(name: str, english_name: str = "", company: str = "", title_on_card: str = "", website: str = "") -> list:
     """
     搜尋最具代表性 / 實質相關的新聞與文章。
     若相關性不高，寧缺勿濫，不強湊 3 篇。
@@ -417,19 +508,32 @@ def find_top_articles(name: str, english_name: str = "", company: str = "", titl
     c_name = name.strip()
     c_eng = english_name.strip()
     c_comp = clean_query_term(company)
+    has_chinese_name = len(re.sub(r"[^\u4e00-\u9fff]", "", c_name)) >= 2
+    web_domain = urllib.parse.urlparse(website).netloc.lower().replace("www.", "") if website else ""
 
     queries = []
     if c_name and c_comp:
         queries.append(f'"{c_name}" "{c_comp}"')
     if c_eng and c_comp:
-        queries.append(f'{c_eng} {c_comp}')
-    if c_name:
+        queries.append(f'"{c_eng}" "{c_comp}"')
+    if web_domain and (c_name or c_eng):
+        term = c_name or c_eng
+        queries.append(f'"{term}" "{web_domain}"')
+
+    # 只有具備中文姓名時，才可進行單純人名專訪/報導搜尋；純英文姓名（如 Coco Lee）絕不進行單獨搜尋
+    if has_chinese_name:
         queries.append(f'"{c_name}" 專訪')
         queries.append(f'"{c_name}" 報導')
+
     if c_comp:
-        queries.append(f'"{c_comp}" 新聞')
-        queries.append(f'"{c_comp}" 專訪')
-        queries.append(f'"{c_comp}" AI 發表')
+        # 若公司名是短英文 (如 CHING)，加上 "公司" 或 "官網"，避免匹配如 "Brian Ching" 運動員
+        if len(c_comp) <= 5 and re.match(r'^[a-zA-Z0-9]+$', c_comp):
+            queries.append(f'"{c_comp}" 公司')
+            queries.append(f'"{c_comp}" 官網')
+        else:
+            queries.append(f'"{c_comp}" 新聞')
+            queries.append(f'"{c_comp}" 專訪')
+            queries.append(f'"{c_comp}" AI 發表')
 
     candidates = []
 
@@ -447,7 +551,7 @@ def find_top_articles(name: str, english_name: str = "", company: str = "", titl
             if domain.startswith("www."):
                 domain = domain[4:]
 
-            is_rel, score, match_reason = score_article_relevance(u, t, s, c_name, c_eng, c_comp, title_on_card)
+            is_rel, score, match_reason = score_article_relevance(u, t, s, c_name, c_eng, c_comp, title_on_card, website)
             if is_rel:
                 seen_urls.add(u)
                 candidates.append({
@@ -628,10 +732,10 @@ def mine_company_and_location_clues(card: dict) -> dict:
 # 4. 頭像照片搜尋與下載 (Avatar Search & Square Crop)
 # =========================================================================
 
-def find_and_save_avatar(name: str, english_name: str = "", company: str = "", card_id: str = "") -> dict:
+def find_and_save_avatar(name: str, english_name: str = "", company: str = "", card_id: str = "", website: str = "") -> dict:
     """
     搜尋個人照片，下載並存為 square JPEG 頭像 (avatars/<card_id>.jpg)。
-    若無高可信度照片則不產生，避免拿風景或圖表充數。
+    若無高可信度照片則不產生，避免拿錯誤人物充數。
     """
     if not card_id:
         return {}
@@ -639,18 +743,47 @@ def find_and_save_avatar(name: str, english_name: str = "", company: str = "", c
     c_name = name.strip()
     c_eng = english_name.strip()
     c_comp = clean_query_term(company)
+    has_chinese_name = len(re.sub(r"[^\u4e00-\u9fff]", "", c_name)) >= 2
+    web_domain = urllib.parse.urlparse(website).netloc.lower().replace("www.", "") if website else ""
 
     candidate_queries = []
     if c_name and c_comp:
         candidate_queries.append(f'"{c_name}" "{c_comp}"')
     if c_eng and c_comp:
         candidate_queries.append(f'"{c_eng}" "{c_comp}"')
-    if c_name:
+    if web_domain and (c_name or c_eng):
+        term = c_name or c_eng
+        candidate_queries.append(f'"{term}" "{web_domain}"')
+
+    # 只有具備中文姓名且沒有公司時，才做單純職稱搜尋；純英文名若無公司絕對不可單獨搜尋，以防搜尋到國際藝人
+    if has_chinese_name and not c_comp:
         candidate_queries.append(f'"{c_name}" 經理 OR 總經理 OR 執行長 OR 代表')
 
     for q in candidate_queries:
         img_urls = search_web_images(q, max_results=6)
         for u in img_urls:
+            u_lower = u.lower()
+            # 排除娛樂網站與歌手/名人相關圖片
+            if any(sig in u_lower for sig in ["kknews", "starsunfolded", "billboard", "grammy", "celebrity"]):
+                continue
+            if "李玟" not in c_name and any(sig in u_lower for sig in ["coco_lee", "coco-lee", "cocolee", "liwen", "leewen"]):
+                continue
+
+            # 排除社群論壇、電商與不可信 UGC 圖片
+            exclude_img_domains = [
+                "dcard.tw", "ptt.cc", "threads.net", "pinterest", "reddit", "yandex",
+                "tiktok", "instagram", "facebook", "shopee", "ruten", "taobao", "amazon",
+                "youtube", "bilibili"
+            ]
+            if any(ed in u_lower for ed in exclude_img_domains):
+                continue
+
+            # 若是純英文姓名（沒有中文名，如 Coco Lee），非官方網域或高信任來源不可採納為頭像
+            if not has_chinese_name:
+                is_official = (web_domain and web_domain in u_lower) or ("linkedin.com" in u_lower)
+                if not is_official:
+                    continue
+
             try:
                 req = urllib.request.Request(u, headers=HEADERS)
                 with urllib.request.urlopen(req, timeout=5) as resp:
@@ -694,7 +827,7 @@ def enrich_card_data(card: dict) -> dict:
     """
     智慧擴充名片資料：
       1. 個人社群帳號 (`social_profiles`)：嚴格相關性過濾，無關者略過。
-      2. 代表性熱門文章 (`top_articles`)：排除股票流水帳與求職，無關者略過。
+      2. 代表性熱門文章 (`top_articles`)：排除股票流水帳、求職與名人混淆，無關者略過。
       3. 公司網站、地址與地圖評論線索 (`company_insights`)：若個人資訊少，深掘背景線索。
       4. 個人照片頭像 (`avatar_url`)：高可信度頭像下載與本地儲存。
     """
@@ -703,18 +836,19 @@ def enrich_card_data(card: dict) -> dict:
     c_eng = str(card.get("english_name", "")).strip()
     c_comp = str(card.get("company", "")).strip()
     c_title = str(card.get("title", "")).strip()
+    c_web = str(card.get("website", "")).strip()
 
     # 1. 社群帳號 (嚴格過濾)
-    socials = find_social_profiles(c_name, c_eng, c_comp, c_title)
+    socials = find_social_profiles(c_name, c_eng, c_comp, c_title, c_web)
 
     # 2. 代表性文章 (嚴格過濾)
-    articles = find_top_articles(c_name, c_eng, c_comp, c_title)
+    articles = find_top_articles(c_name, c_eng, c_comp, c_title, c_web)
 
     # 3. 公司、地址與地圖評論線索深掘
     insights = mine_company_and_location_clues(card)
 
     # 4. 個人照片
-    avatar_res = find_and_save_avatar(c_name, c_eng, c_comp, c_id)
+    avatar_res = find_and_save_avatar(c_name, c_eng, c_comp, c_id, c_web)
 
     return {
         "social_profiles": socials,

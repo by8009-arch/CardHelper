@@ -24,8 +24,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const alertContainer = document.getElementById('alertContainer');
     const exportCsvBtn = document.getElementById('exportCsvBtn');
 
+    const togglePendingBtn = document.getElementById('togglePendingBtn');
+    const pendingCardsBody = document.getElementById('pendingCardsBody');
+    const pendingSectionToggle = document.getElementById('pendingSectionToggle');
+
     const toggleManualBtn = document.getElementById('toggleManualBtn');
     const manualFormBody = document.getElementById('manualFormBody');
+    const manualFormToggle = document.getElementById('manualFormToggle');
     const formHeaderTitle = document.getElementById('formHeaderTitle');
     const cancelEditBtn = document.getElementById('cancelEditBtn');
     const submitCardBtn = document.getElementById('submitCardBtn');
@@ -1255,7 +1260,7 @@ document.addEventListener('DOMContentLoaded', () => {
         submitCardBtn.textContent = '💾 儲存修改';
         submitCardBtn.classList.replace('btn-primary', 'btn-warning');
         cancelEditBtn.classList.remove('d-none');
-        manualFormBody.classList.remove('d-none');
+        toggleManualFormSection(true);
         cardForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
@@ -1268,6 +1273,7 @@ document.addEventListener('DOMContentLoaded', () => {
         submitCardBtn.textContent = '➕ 新增至名片資料庫';
         submitCardBtn.classList.replace('btn-warning', 'btn-primary');
         cancelEditBtn.classList.add('d-none');
+        toggleManualFormSection(false);
     }
 
     async function deleteCard(id, name) {
@@ -1316,9 +1322,53 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    toggleManualBtn.addEventListener('click', () => {
-        manualFormBody.classList.toggle('d-none');
-    });
+    function togglePendingSection(forceOpen) {
+        if (!pendingCardsBody) return;
+        const willOpen = (typeof forceOpen === 'boolean') ? forceOpen : pendingCardsBody.classList.contains('d-none');
+        if (willOpen) {
+            pendingCardsBody.classList.remove('d-none');
+            if (togglePendingBtn) togglePendingBtn.textContent = '收折處理名片 ▲';
+        } else {
+            pendingCardsBody.classList.add('d-none');
+            if (togglePendingBtn) togglePendingBtn.textContent = '展開處理名片 ▼';
+        }
+    }
+
+    function toggleManualFormSection(forceOpen) {
+        if (!manualFormBody) return;
+        const willOpen = (typeof forceOpen === 'boolean') ? forceOpen : manualFormBody.classList.contains('d-none');
+        if (willOpen) {
+            manualFormBody.classList.remove('d-none');
+            if (toggleManualBtn) toggleManualBtn.textContent = '收折手動輸入 ▲';
+        } else {
+            manualFormBody.classList.add('d-none');
+            if (toggleManualBtn) toggleManualBtn.textContent = '展開手動輸入 ▼';
+        }
+    }
+
+    if (togglePendingBtn) {
+        togglePendingBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            togglePendingSection();
+        });
+    }
+    if (pendingSectionToggle) {
+        pendingSectionToggle.addEventListener('click', () => {
+            togglePendingSection();
+        });
+    }
+
+    if (toggleManualBtn) {
+        toggleManualBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleManualFormSection();
+        });
+    }
+    if (manualFormToggle) {
+        manualFormToggle.addEventListener('click', () => {
+            toggleManualFormSection();
+        });
+    }
 
     cancelEditBtn.addEventListener('click', resetEditForm);
 

@@ -32,8 +32,8 @@
         <div id="alertContainer"></div>
 
         <!-- 區塊 1：img 目錄名片圖檔自動讀取與提取 -->
-        <div class="card shadow-sm border-0 mb-4">
-            <div class="card-header bg-white py-3 d-flex flex-wrap justify-content-between align-items-center gap-2 border-bottom">
+        <div class="card shadow-sm border-0 mb-4" id="pendingSectionCard">
+            <div class="card-header bg-white py-3 d-flex flex-wrap justify-content-between align-items-center gap-2 border-bottom" id="pendingSectionToggle" style="cursor: pointer;">
                 <div>
                     <h5 class="mb-0 fw-bold text-primary d-flex align-items-center gap-2">
                         <span>🖼️</span> 待處理名片圖檔（自動讀取 <code>img/</code> 目錄）
@@ -42,6 +42,11 @@
                     <small class="text-muted">點選單張或多張名片（支援單一圖檔包含最多 4 張名片自動分割辨識），點擊「自動提取名片資料」即可辨識內容、存入資料庫並自動移至 <code>done/</code> 目錄</small>
                 </div>
                 <div class="d-flex flex-wrap align-items-center gap-2">
+                    <button class="btn btn-sm btn-outline-primary" type="button" id="togglePendingBtn">展開處理名片 ▼</button>
+                </div>
+            </div>
+            <div class="card-body d-none" id="pendingCardsBody">
+                <div class="d-flex flex-wrap justify-content-end align-items-center gap-2 mb-3">
                     <button type="button" class="btn btn-outline-secondary btn-sm" id="refreshImgBtn">
                         🔄 重新掃描目錄
                     </button>
@@ -55,8 +60,7 @@
                         ✨ 自動提取資料並新增至資料庫 (<span id="selectedCount">0</span>)
                     </button>
                 </div>
-            </div>
-            <div class="card-body">
+
                 <!-- 批次提取時的預設背書/備註 (選填) -->
                 <div class="mb-3 d-flex align-items-center gap-2 bg-light p-2 rounded border">
                     <span class="small fw-semibold text-secondary text-nowrap">📝 匯入預設的備註（選填）：</span>
@@ -84,11 +88,11 @@
 
         <!-- 區塊 2：手動輸入 / 編輯名片 -->
         <div class="card shadow-sm border-0 mb-4">
-            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center" id="manualFormToggle">
+            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center" id="manualFormToggle" style="cursor: pointer;">
                 <h5 class="mb-0 fw-bold text-dark" id="formHeaderTitle">✍️ 手動輸入 / 新增名片</h5>
-                <button class="btn btn-sm btn-outline-primary" type="button" id="toggleManualBtn">展開 / 收合表單</button>
+                <button class="btn btn-sm btn-outline-primary" type="button" id="toggleManualBtn">展開手動輸入 ▼</button>
             </div>
-            <div class="card-body" id="manualFormBody">
+            <div class="card-body d-none" id="manualFormBody">
                 <form id="cardForm">
                     <input type="hidden" id="editCardId" value="">
                     <div class="row g-3">
@@ -346,6 +350,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=20261009_5"></script>
+    <script src="app.js?v=20261009_6"></script>
 </body>
 </html>
