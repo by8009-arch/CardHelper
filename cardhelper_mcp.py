@@ -91,20 +91,6 @@ TOOLS = [
             },
             "required": ["card_id", "important"]
         }
-    },
-    {
-        "name": "cardhelper_enrich_card",
-        "description": "在網路上自動探索指定人員/名片的個人社群帳號（LinkedIn、Facebook、Instagram、X、GitHub 等）、1張相片與點閱率/代表性最高的3篇文章，並更新儲存至名片中。",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "card_id": {
-                    "type": "string",
-                    "description": "名片的唯一 ID 或姓名"
-                }
-            },
-            "required": ["card_id"]
-        }
     }
 ]
 
@@ -159,28 +145,6 @@ def handle_tool_call(name, arguments):
             "important": bool(arguments.get("important", True)),
         }
         return call_http_json("POST", "/api/cards/important", payload)
-
-    elif name == "cardhelper_enrich_card":
-        cid = arguments.get("card_id", "") or arguments.get("id", "")
-        try:
-            return call_http_json("POST", f"/api/cards/{urllib.parse.quote(cid)}/enrich")
-        except Exception:
-            sys.path.insert(0, BASE_DIR)
-            import server
-            import search_enricher
-            cards = server.load_cards()
-            target_card = next((c for c in cards if c.get("id") == cid or cid.lower() in (c.get("name") or "").lower()), None)
-            if not target_card:
-                return {"ok": False, "error": f"找不到名片：{cid}"}
-            enrich_res = search_enricher.enrich_card_data(target_card)
-            target_card.update({
-                "avatar_url": enrich_res.get("avatar_url") or target_card.get("avatar_url"),
-                "social_profiles": enrich_res.get("social_profiles", []),
-                "top_articles": enrich_res.get("top_articles", []),
-                "company_insights": enrich_res.get("company_insights", {}),
-            })
-            server.save_cards(cards)
-            return {"ok": True, "card": target_card, "enriched": enrich_res}
 
     return {"ok": False, "error": f"未知的工具名稱：{name}"}
 

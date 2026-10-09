@@ -219,41 +219,6 @@ body {
     font-weight: 600;
 }
 
-.card-avatar-img {
-    width: 52px;
-    height: 52px;
-    object-fit: cover;
-    border: 2px solid #0d6efd;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
-    cursor: pointer;
-    transition: transform 0.2s ease;
-}
-
-.card-avatar-img:hover {
-    transform: scale(1.08);
-}
-
-.card-avatar-placeholder {
-    width: 52px;
-    height: 52px;
-    background-color: #f8f9fa;
-    border-color: #dee2e6 !important;
-    font-size: 1.4rem;
-    user-select: none;
-}
-
-.card-article-item {
-    background-color: #f8f9fa;
-    border: 1px solid #e9ecef;
-    border-radius: 8px;
-    padding: 8px 10px;
-    transition: background-color 0.15s ease;
-}
-
-.card-article-item:hover {
-    background-color: #f1f5f9;
-}
-
 .text-truncate-2 {
     display: -webkit-box;
     -webkit-line-clamp: 2;

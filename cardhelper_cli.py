@@ -106,40 +106,6 @@ def cmd_important(args):
         sys.exit(1)
 
 
-def cmd_enrich(args):
-    target = args.target
-    card_id = target
-    try:
-        cards_res = call_http_json("GET", f"/api/cards/search?q={urllib.parse.quote(target)}")
-        if cards_res.get("cards"):
-            card_id = cards_res["cards"][0].get("id")
-    except Exception:
-        pass
-
-    try:
-        res = call_http_json("POST", f"/api/cards/{urllib.parse.quote(card_id)}/enrich")
-        print(json.dumps(res, ensure_ascii=False, indent=2))
-        return
-    except Exception:
-        sys.path.insert(0, BASE_DIR)
-        import server
-        import search_enricher
-        cards = server.load_cards()
-        target_card = next((c for c in cards if c.get("id") == card_id or target.lower() in (c.get("name") or "").lower()), None)
-        if not target_card:
-            print(json.dumps({"ok": False, "error": f"找不到名片：{target}"}, ensure_ascii=False, indent=2))
-            sys.exit(1)
-        enrich_res = search_enricher.enrich_card_data(target_card)
-        target_card.update({
-            "avatar_url": enrich_res.get("avatar_url") or target_card.get("avatar_url"),
-            "social_profiles": enrich_res.get("social_profiles", []),
-            "top_articles": enrich_res.get("top_articles", []),
-            "company_insights": enrich_res.get("company_insights", {}),
-        })
-        server.save_cards(cards)
-        print(json.dumps({"ok": True, "card": target_card, "enriched": enrich_res}, ensure_ascii=False, indent=2))
-
-
 def main():
     parser = argparse.ArgumentParser(description="CardHelper CLI for Hermes Agent")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -162,10 +128,6 @@ def main():
     p_imp.add_argument("--on", action="store_true", help="標記為重要並同步至 macOS 聯絡人 (預設)")
     p_imp.add_argument("--off", action="store_true", help="取消重要標記並從 macOS 聯絡人移除")
     p_imp.set_defaults(func=cmd_important)
-
-    p_enr = subparsers.add_parser("enrich", help="在網路上自動探索個人社群帳號、相片與前3篇熱門文章")
-    p_enr.add_argument("target", help="名片 ID 或姓名")
-    p_enr.set_defaults(func=cmd_enrich)
 
     args = parser.parse_args()
     args.func(args)
