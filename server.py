@@ -285,8 +285,8 @@ CARD_PROFILE_TECC_CHEN_EN = {
 CARD_PROFILE_TECC_CHEN_MUMIN = {
     "name": "陳牧民 Mumin Chen",
     "english_name": "Mumin Chen",
-    "company": "駐印度台北經濟文化中心",
-    "title": "代表",
+    "company": "駐印度台北經濟文化中心 (駐印度代表處)",
+    "title": "代表 (駐印度代表)",
     "tax_id": "",
     "phone": "(+91) 11-46077701 / (+91) 11-46077777",
     "mobile": "",
@@ -2559,6 +2559,10 @@ def search_cards_query(query_str="", important_only=False):
             continue
         country_str = " ".join(detect_card_countries(c)).lower()
         haystack = (" ".join(str(c.get(k, "")) for k in CARD_FIELDS) + " " + country_str).lower()
+        if "駐印度" in haystack or "tecc" in haystack:
+            haystack += " 駐印度代表處 駐印度台北經濟文化中心 駐印度經濟文化中心 駐印度代表 駐印度 印度代表處 印度代表 tecc india"
+        if any(w in haystack for w in ["經濟文化中心", "經濟文化辦事處", "代表處", "辦事處"]):
+            haystack += " 代表處 經濟文化中心 經濟文化辦事處 辦事處"
         if c.get("important") and "重要" in q:
             results.append(c)
             continue
