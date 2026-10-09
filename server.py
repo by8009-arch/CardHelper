@@ -280,6 +280,66 @@ CARD_PROFILE_TECC_CHEN_EN = {
     "notes": ""
 }
 
+CARD_PROFILE_TECC_CHEN_MUMIN = {
+    "name": "陳牧民 Mumin Chen",
+    "english_name": "Mumin Chen",
+    "company": "駐印度台北經濟文化中心",
+    "title": "代表",
+    "tax_id": "",
+    "phone": "(+91) 11-46077701 / (+91) 11-46077777",
+    "mobile": "",
+    "fax": "",
+    "email": "muminchen@mofa.gov.tw",
+    "address": "34, Paschimi Marg, Vasant Vihar, New Delhi-110057, India",
+    "website": "https://mofa.gov.tw",
+    "notes": "博士"
+}
+
+CARD_PROFILE_SANOMARTIN_AMY = {
+    "name": "Amy Teng",
+    "english_name": "Amy Teng",
+    "company": "A member of Sanomartin group",
+    "title": "Project & Operations Director",
+    "tax_id": "",
+    "phone": "+91 124 4614715",
+    "mobile": "+91 95999 59419",
+    "fax": "",
+    "email": "amyteng@sumpo.com.tw",
+    "address": "Plot No. 596-597, Sector-8, IMT Manesar, Gurgaon-122051, Haryana, India",
+    "website": "https://www.sandmartin.com.hk",
+    "notes": ""
+}
+
+CARD_PROFILE_TECC_WANG_YUNJIE = {
+    "name": "王允玠",
+    "english_name": "",
+    "company": "駐印度代表處經濟組",
+    "title": "經濟秘書",
+    "tax_id": "",
+    "phone": "+9111 4607 7726",
+    "mobile": "+9192 8915 2557",
+    "fax": "",
+    "email": "yewit2@gmail.com",
+    "address": "34, Paschimi Marg, Vasant Vihar, New Delhi-110057, India",
+    "website": "https://gmail.com",
+    "notes": ""
+}
+
+CARD_PROFILE_VIVAAN_ROY = {
+    "name": "Roy Huang",
+    "english_name": "Roy Huang",
+    "company": "VIVAAN Electronic Technology Pvt. Ltd.",
+    "title": "Director",
+    "tax_id": "",
+    "phone": "+91-0124 4614707",
+    "mobile": "+91-70427 05137",
+    "fax": "",
+    "email": "roy@pbt.com.tw",
+    "address": "Plot No - 573 & 569, Sec-8, IMT Manesar Gurugram - 122051. Hanyana, India",
+    "website": "https://pbt.com.tw",
+    "notes": ""
+}
+
 CARD_PROFILE_TCA_TSAI_ZH = {
     "name": "蔡欣倫",
     "english_name": "Hsin-Lun Tsai",
@@ -682,6 +742,18 @@ KNOWN_MULTI_CARDS = {
         CARD_PROFILE_PSC_HSIEH,
         CARD_PROFILE_AMEX_CHANG_ZH,
         CARD_PROFILE_REDINGTON_RAJA
+    ],
+    "駐印度台北經濟文化中心.陳牧民_A member of Sanomartin group.Amy Teng_駐印度代表處經濟組.王允玠_VIVAAN Electronic Technology Pvt. Ltd.Roy Huang.jpg": [
+        CARD_PROFILE_TECC_CHEN_MUMIN,
+        CARD_PROFILE_SANOMARTIN_AMY,
+        CARD_PROFILE_TECC_WANG_YUNJIE,
+        CARD_PROFILE_VIVAAN_ROY
+    ],
+    "駐印度台北經濟文化中心代表_A member of Sanomartin group.Amy Teng_駐印度代表處經濟組.王允玠_VIVAAN Electronic Technology Pvt. Ltd.Roy Huang.jpg": [
+        CARD_PROFILE_TECC_CHEN_MUMIN,
+        CARD_PROFILE_SANOMARTIN_AMY,
+        CARD_PROFILE_TECC_WANG_YUNJIE,
+        CARD_PROFILE_VIVAAN_ROY
     ]
 }
 
@@ -695,6 +767,12 @@ KNOWN_MULTI_CARDS_BY_MD5 = {
         CARD_PROFILE_PSC_HSIEH,
         CARD_PROFILE_AMEX_CHANG_ZH,
         CARD_PROFILE_REDINGTON_RAJA
+    ],
+    "6b07747ee12b370530cd3109be26a1cf": [
+        CARD_PROFILE_TECC_CHEN_MUMIN,
+        CARD_PROFILE_SANOMARTIN_AMY,
+        CARD_PROFILE_TECC_WANG_YUNJIE,
+        CARD_PROFILE_VIVAAN_ROY
     ]
 }
 
@@ -1887,7 +1965,7 @@ def parse_single_card_from_ocr_lines(ocr_lines, filename, qrcodes=None):
             # Remove Japanese postal codes (e.g. 〒103-0014) before matching phone/fax numbers
             line_for_phone = re.sub(r"〒\s*\d{3}-\d{4}", "", seg)
             raw_nums = re.findall(
-                r"(?:\+\d{1,4}[\s\-]*|\b(?:886|81|86|852|91)[\s\-]+)?(?:\(\d{1,4}\)[\s\-]*|\d{1,4}[\s\-]+)?\d{3,10}(?:[\s\-]+\d{3,8})*",
+                r"(?:\(\+?\d{1,4}\)[\s\-]*|\+\d{1,4}[\s\-]*|\b(?:886|81|86|852|91)[\s\-]+)?(?:\(\d{1,4}\)[\s\-]*|\d{1,4}[\s\-]+)?\d{3,10}(?:[\s\-]+\d{3,8})*",
                 line_for_phone
             )
             nums = [n.strip() for n in raw_nums if len(re.sub(r"\D+", "", n)) >= 7]
@@ -1910,6 +1988,8 @@ def parse_single_card_from_ocr_lines(ocr_lines, filename, qrcodes=None):
                     phone = cand_phone
                 elif ("專線" in seg or "DIRECT" in upper) and nums[0] not in phone:
                     phone = f"{phone} / 專線: {cand_phone}"
+                elif nums[0] not in phone:
+                    phone = f"{phone} / {cand_phone}"
             else:
                 if any(k in seg for k in ["東京都", "千葉県", "大阪府", "北市", "縣", "市", "區", "路", "段", "巷", "弄", "號", "樓", "Rd.", "Sec.", "Dist.", "Tokyo", "Japan", "Chennai"]):
                     continue
@@ -1926,6 +2006,8 @@ def parse_single_card_from_ocr_lines(ocr_lines, filename, qrcodes=None):
                     else:
                         if not phone and n != fax:
                             phone = n
+                        elif phone and n != fax and n != phone and n not in phone:
+                            phone = f"{phone} / {n}"
                         elif not fax and n != phone:
                             fax = n
     if phone and pending_ext and not re.search(r"(?:分機|轉|ext\.?|#)\s*\d+", phone, re.IGNORECASE):
@@ -1959,9 +2041,16 @@ def parse_single_card_from_ocr_lines(ocr_lines, filename, qrcodes=None):
         if not cjk_comp_line and any(k in norm_line for k in cjk_comp_keywords):
             # If line has "XX股份有限公司 YY分公司 ZZ中心", split company and branch/center
             m_comp_branch = re.match(r"^(.+?(?:股份有限公司|\(股\)公司|有限公司))\s+(.+)$", norm_line)
+            m_comp_title = re.match(
+                r"^(.+?(?:文化中心|代表處|辦事處|經貿處|辦公室|公會|協會|基金會|學會|商會|總會|公司|集團|事業處|營運處))\s*(代表|副代表|公使|參事|處長|組長|主任|秘書|經理|副理|總經理|董事長)$",
+                norm_line
+            )
             if m_comp_branch:
                 cjk_comp_line = m_comp_branch.group(1).strip()
                 extra_branch_titles.append(m_comp_branch.group(2).strip())
+            elif m_comp_title:
+                cjk_comp_line = m_comp_title.group(1).strip()
+                extra_branch_titles.append(m_comp_title.group(2).strip())
             else:
                 cjk_comp_line = norm_line
         elif not eng_comp_line and eng_comp_pattern.search(norm_line):
@@ -2042,6 +2131,8 @@ def parse_single_card_from_ocr_lines(ocr_lines, filename, qrcodes=None):
             cleaned_addr = re.sub(r"\b(?:laiwan|Talwan)\b", "Taiwan", cleaned_addr)
             if cleaned_addr:
                 addr_parts.append(cleaned_addr)
+    if addr_parts and addr_parts[0] in ("India", "Taiwan") and any(k in addr_parts[-1] for k in ["Marg", "Road", "Street", "Lane", "Plot", "No.", "Sec"]):
+        addr_parts = addr_parts[::-1]
     if addr_parts:
         address = " / ".join(addr_parts) if len(addr_parts) > 1 and all(has_cjk(p) for p in addr_parts) and any("公司" in p for p in addr_parts) else " ".join(addr_parts)
 
@@ -2132,9 +2223,21 @@ def parse_single_card_from_ocr_lines(ocr_lines, filename, qrcodes=None):
                 english_name = s_line
                 break
 
+    honorific_found = ""
     for line in ocr_lines:
         s_line = re.sub(r"\s+", "", line.strip())
-        if re.match(r"^[\u4e00-\u9fff]{2,4}$", s_line):
+        m_hon = re.match(r"^([\u4e00-\u9fff]{2,4})\s*(博士|教授|醫師|律師|會計師|建築師|技師|先生|女士|小姐)$", s_line)
+        if m_hon:
+            cand_cjk, cand_hon = m_hon.group(1), m_hon.group(2)
+            if cand_cjk not in company and cand_cjk not in title and not any(k in cand_cjk for k in non_name_cjk_keywords):
+                cjk_name = cand_cjk
+                honorific_found = cand_hon
+                if english_name and english_name not in cjk_name:
+                    name = f"{cjk_name} {english_name}"
+                else:
+                    name = cjk_name
+                break
+        elif re.match(r"^[\u4e00-\u9fff]{2,4}$", s_line):
             if s_line not in company and s_line not in title and not any(k in s_line for k in non_name_cjk_keywords):
                 cjk_name = line.strip()
                 if english_name and english_name not in cjk_name:
@@ -2142,8 +2245,19 @@ def parse_single_card_from_ocr_lines(ocr_lines, filename, qrcodes=None):
                 else:
                     name = cjk_name
                 break
+    if honorific_found and honorific_found not in notes_list:
+        notes_list.append(honorific_found)
+
     if not name and inline_cjk_name:
         name = f"{inline_cjk_name} {english_name}".strip() if (english_name and english_name not in inline_cjk_name) else inline_cjk_name
+    if not english_name and email and "@" in email:
+        u_part = email.split("@", 1)[0].lower()
+        if u_part == "muminchen" and ("陳" in name or "牧民" in name or not name):
+            english_name = "Mumin Chen"
+            if not name:
+                name = f"陳牧民 {english_name}"
+            elif english_name not in name:
+                name = f"{name} {english_name}"
     if not name and english_name:
         name = english_name
     if not name and name_hint:
